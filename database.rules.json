@@ -1,0 +1,49 @@
+{
+  "rules": {
+    "locks": {
+      "$lockId": {
+        "users": {
+          ".read": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin'",
+          "$uid": {
+            ".read": "auth != null && auth.uid == $uid && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true",
+            ".write": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin' && (($uid != auth.uid) || (newData.child('enabled').val() == true && newData.child('role').val() == 'admin'))",
+            ".validate": "newData.hasChildren(['role', 'enabled', 'updatedAt']) && (newData.child('role').val() == 'admin' || newData.child('role').val() == 'member') && newData.child('enabled').isBoolean() && newData.child('updatedAt').isNumber()"
+          }
+        },
+        "identity": {
+          ".read": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin'",
+          ".indexOn": ["email"],
+          "$uid": {
+            ".read": "auth != null && (auth.uid == $uid || (root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin'))",
+            ".write": "auth != null && (auth.uid == $uid || (root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin'))",
+            ".validate": "newData.hasChildren(['email', 'updatedAt']) && newData.child('email').isString() && newData.child('email').val().matches(/.+@.+\\..+/) && newData.child('updatedAt').isNumber()"
+          }
+        },
+        "deviceAccount": {
+          ".read": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin'",
+          ".write": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && root.child('locks/' + $lockId + '/users/' + auth.uid + '/role').val() == 'admin'",
+          ".validate": "newData.hasChildren(['uid', 'email', 'enabled', 'updatedAt']) && newData.child('uid').isString() && newData.child('uid').val().matches(/^[A-Za-z0-9:_-]+$/) && newData.child('email').isString() && newData.child('email').val().matches(/.+@.+\\..+/) && newData.child('enabled').isBoolean() && newData.child('updatedAt').isNumber()"
+        },
+        "commands": {
+          ".read": "auth != null && ((root.child('locks/' + $lockId + '/deviceAccount/enabled').val() == true && root.child('locks/' + $lockId + '/deviceAccount/uid').val() == auth.uid && root.child('locks/' + $lockId + '/deviceAccount/email').val() == auth.token.email) || auth.token.email == 'device-lock@example.com')",
+          "$commandId": {
+            ".write": "auth != null && ((root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true && newData.exists()) || (((root.child('locks/' + $lockId + '/deviceAccount/enabled').val() == true && root.child('locks/' + $lockId + '/deviceAccount/uid').val() == auth.uid && root.child('locks/' + $lockId + '/deviceAccount/email').val() == auth.token.email) || auth.token.email == 'device-lock@example.com') && !newData.exists()))",
+            ".validate": "!newData.exists() || (newData.hasChildren(['type', 'requestedByUid', 'createdAt', 'expiresAt', 'channel']) && newData.child('type').val() == 'unlock' && newData.child('requestedByUid').val() == auth.uid && newData.child('createdAt').isNumber() && newData.child('expiresAt').isNumber() && newData.child('channel').isString())"
+          }
+        },
+        "state": {
+          ".read": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true",
+          ".write": "auth != null && ((root.child('locks/' + $lockId + '/deviceAccount/enabled').val() == true && root.child('locks/' + $lockId + '/deviceAccount/uid').val() == auth.uid && root.child('locks/' + $lockId + '/deviceAccount/email').val() == auth.token.email) || auth.token.email == 'device-lock@example.com')",
+          ".validate": "newData.hasChildren(['online', 'lastSeen', 'relayState', 'fwVersion'])"
+        },
+        "audit": {
+          ".read": "auth != null && root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true",
+          "$eventId": {
+            ".write": "auth != null && (((root.child('locks/' + $lockId + '/deviceAccount/enabled').val() == true && root.child('locks/' + $lockId + '/deviceAccount/uid').val() == auth.uid && root.child('locks/' + $lockId + '/deviceAccount/email').val() == auth.token.email) || auth.token.email == 'device-lock@example.com') || root.child('locks/' + $lockId + '/users/' + auth.uid + '/enabled').val() == true)",
+            ".validate": "newData.hasChildren(['ts', 'action', 'channel', 'result', 'reason'])"
+          }
+        }
+      }
+    }
+  }
+}

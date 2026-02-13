@@ -1,0 +1,19 @@
+# Flutter
+app/.dart_tool/
+app/.packages
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.metadata
+
+# IDE
+**/.idea/
+**/.vscode/
+
+# NodeMCU secrets
+nodemcu/poot_lock/secrets.h
+
+# Android signing secrets
+app/android/key.properties
+app/android/poot-upload-keystore.jks
+app/android/poot-upload-keystore.jks.bak.*

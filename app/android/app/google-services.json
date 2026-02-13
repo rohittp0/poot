@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "100656446575",
+    "firebase_url": "https://poottiko-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "poottiko",
+    "storage_bucket": "poottiko.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:100656446575:android:e4eaadbcd83a04cf2de19a",
+        "android_client_info": {
+          "package_name": "com.rohittp.poot"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "100656446575-qr9m9l2ksv43dl6j18hgcr1tu80ht61b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.rohittp.poot",
+            "certificate_hash": "a178fb3a3c9a8774108a315332208aa7f3e01219"
+          }
+        },
+        {
+          "client_id": "100656446575-d7fds2iqurejfhd8vlgf1gpoluab4pfl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDl0OpjwMwXjMwbW1khvPwhS12gqaxQhm0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "100656446575-d7fds2iqurejfhd8vlgf1gpoluab4pfl.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "100656446575-1rh638omtni9e2nl4p9uj24asd498sje.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.rohittp.poot"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
