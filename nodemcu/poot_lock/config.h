@@ -23,7 +23,7 @@ static constexpr uint32_t kStatusBlinkSlowMs = 700;
 static constexpr uint32_t kStatusBlinkFastMs = 180;
 static constexpr uint32_t kWiFiConnectingWindowMs = 8000;
 
-static constexpr uint32_t kUnlockPulseMs = 900;
+static constexpr uint32_t kUnlockPulseMs = 15000;
 static constexpr uint32_t kUnlockCooldownMs = 5000;
 static constexpr uint32_t kCloudPollMs = 2500;
 static constexpr uint32_t kHeartbeatMs = 30000;
@@ -39,7 +39,7 @@ static constexpr uint16_t kLocalHttpPort = 80;
 static constexpr uint8_t kApChannel = 6;
 static constexpr uint8_t kApMaxConnections = 4;
 
-static constexpr const char* kFirmwareVersion = "poot-esp8266-1.0.7";
+static constexpr const char* kFirmwareVersion = "poot-esp8266-1.0.8";
 
 static constexpr uint32_t kFirebaseTokenRefreshSkewSec = 120;
 static constexpr uint8_t kCommandFetchLimit = 6;
