@@ -7,6 +7,7 @@ ANDROID_DIR="$APP_DIR/android"
 FIREBASE_OPTIONS_FILE="$APP_DIR/lib/firebase_options.dart"
 SECRETS_FILE="$ROOT_DIR/nodemcu/poot_lock/secrets.h"
 FLUTTER_LOCAL_DEFAULTS_FILE="$APP_DIR/lib/src/config/local_fallback_defaults.dart"
+NODEMCU_CONFIG_FILE="$ROOT_DIR/nodemcu/poot_lock/config.h"
 ANDROID_KEYSTORE_FILE="$ANDROID_DIR/poot-upload-keystore.jks"
 ANDROID_KEY_PROPERTIES_FILE="$ANDROID_DIR/key.properties"
 
@@ -384,6 +385,23 @@ register_android_sha_with_firebase() {
   echo "error:$compact_output"
 }
 
+extract_unlock_pulse_ms() {
+  local config_file="$1"
+  if [[ ! -f "$config_file" ]]; then
+    echo "15000"
+    return
+  fi
+
+  local value
+  value="$(sed -n 's/.*kUnlockPulseMs[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$config_file" | head -n 1)"
+  if [[ -z "$value" ]]; then
+    echo "15000"
+    return
+  fi
+
+  echo "$value"
+}
+
 refresh_android_google_services_json() {
   local firebase_bin="$1"
   local project_id="$2"
@@ -696,6 +714,7 @@ ap_ssid_dart_escaped="$(escape_dart_string "$ap_ssid")"
 ap_password_dart_escaped="$(escape_dart_string "$ap_password")"
 local_secret_dart_escaped="$(escape_dart_string "$local_secret")"
 lock_id_dart_escaped="$(escape_dart_string "$lock_id")"
+unlock_pulse_ms="$(extract_unlock_pulse_ms "$NODEMCU_CONFIG_FILE")"
 
 mkdir -p "$(dirname "$SECRETS_FILE")"
 mkdir -p "$(dirname "$FLUTTER_LOCAL_DEFAULTS_FILE")"
@@ -731,6 +750,7 @@ class LocalFallbackDefaults {
   static const String espSsid = '$ap_ssid_dart_escaped';
   static const String espPassword = '$ap_password_dart_escaped';
   static const String sharedSecret = '$local_secret_dart_escaped';
+  static const int unlockPulseMs = $unlock_pulse_ms;
 }
 DARTCFG
 

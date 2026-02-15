@@ -7,5 +7,7 @@ class LocalFallbackDefaults {
   static const String baseUrl = 'http://192.168.4.1';
   static const String espSsid = 'Poot';
   static const String espPassword = '4dd88746d27df87e';
-  static const String sharedSecret = 'e0ef3e2f133dcad3e983aa4776452ec33cda499a5f732ae28bf47ca20a74a02d';
+  static const String sharedSecret =
+      'e0ef3e2f133dcad3e983aa4776452ec33cda499a5f732ae28bf47ca20a74a02d';
+  static const int unlockPulseMs = 5000;
 }

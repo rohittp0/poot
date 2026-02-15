@@ -30,6 +30,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _status = 'Ready';
   bool _statusSuccess = true;
+  Timer? _unlockPulseTicker;
+  Duration _unlockPulseRemaining = Duration.zero;
+
+  bool get _unlockPulseActive => _unlockPulseRemaining > Duration.zero;
+
+  double get _unlockPulseProgress {
+    final int totalMs = AppConfig.unlockPulseDuration.inMilliseconds;
+    if (totalMs <= 0) {
+      return 1;
+    }
+    final int remainingMs = _unlockPulseRemaining.inMilliseconds.clamp(
+      0,
+      totalMs,
+    );
+    final double progress = 1 - (remainingMs / totalMs);
+    return progress.clamp(0.0, 1.0);
+  }
+
+  int get _unlockPulseSecondsLeft {
+    final int ms = _unlockPulseRemaining.inMilliseconds;
+    if (ms <= 0) {
+      return 0;
+    }
+    return (ms / 1000).ceil();
+  }
 
   @override
   void initState() {
@@ -39,6 +64,12 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _runAutoUnlock();
     });
+  }
+
+  @override
+  void dispose() {
+    _unlockPulseTicker?.cancel();
+    super.dispose();
   }
 
   void _seedIdentityFromCurrentUser() {
@@ -92,7 +123,69 @@ class _HomeScreenState extends State<HomeScreen> {
     await _unlock();
   }
 
+  void _startUnlockPulseCountdown() {
+    final Duration duration = AppConfig.unlockPulseDuration;
+    if (duration <= Duration.zero) {
+      return;
+    }
+
+    _unlockPulseTicker?.cancel();
+    final DateTime endsAt = DateTime.now().add(duration);
+
+    setState(() {
+      _unlockPulseRemaining = duration;
+    });
+
+    _unlockPulseTicker = Timer.periodic(const Duration(milliseconds: 100), (
+      Timer timer,
+    ) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      final Duration remaining = endsAt.difference(DateTime.now());
+      if (remaining <= Duration.zero) {
+        timer.cancel();
+        setState(() {
+          _unlockPulseRemaining = Duration.zero;
+        });
+        return;
+      }
+
+      setState(() {
+        _unlockPulseRemaining = remaining;
+      });
+    });
+  }
+
+  Widget _buildUnlockedButtonLabel({required Color progressColor}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        const Text('Unlocked'),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(
+            value: _unlockPulseProgress,
+            strokeWidth: 2.4,
+            valueColor: AlwaysStoppedAnimation<Color>(progressColor),
+            backgroundColor: progressColor.withValues(alpha: 0.28),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text('${_unlockPulseSecondsLeft}s'),
+      ],
+    );
+  }
+
   Future<void> _unlock() async {
+    if (_busy || _unlockPulseActive) {
+      return;
+    }
+
     final int attemptId = ++_unlockAttemptId;
     setState(() {
       _busy = true;
@@ -115,6 +208,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _statusSuccess = result.success;
     });
 
+    if (result.success) {
+      _startUnlockPulseCountdown();
+      return;
+    }
+
     if (!result.success) {
       ScaffoldMessenger.of(
         context,
@@ -123,6 +221,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _unlockLocal() async {
+    if (_busy || _unlockPulseActive) {
+      return;
+    }
+
     final int attemptId = ++_unlockAttemptId;
     setState(() {
       _busy = true;
@@ -155,6 +257,11 @@ class _HomeScreenState extends State<HomeScreen> {
       _status = result.message;
       _statusSuccess = result.success;
     });
+
+    if (result.success) {
+      _startUnlockPulseCountdown();
+      return;
+    }
 
     if (!result.success) {
       ScaffoldMessenger.of(
@@ -296,6 +403,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool unlockCoolingDown = _unlockPulseActive;
+    final bool unlockActionsDisabled = _busy || unlockCoolingDown;
+    final Color primaryProgressColor = Theme.of(context).colorScheme.primary;
+    final Color onPrimaryProgressColor =
+        Theme.of(context).colorScheme.onPrimary;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Poot'),
@@ -321,15 +434,32 @@ class _HomeScreenState extends State<HomeScreen> {
           StatusBanner(message: _status, success: _statusSuccess),
           const SizedBox(height: 16),
           ElevatedButton.icon(
-            onPressed: _busy ? _cancelUnlock : _unlock,
-            icon: Icon(_busy ? Icons.close : Icons.lock_open),
-            label: Text(_busy ? 'Cancel' : 'Unlock now'),
+            onPressed:
+                _busy ? _cancelUnlock : (unlockCoolingDown ? null : _unlock),
+            icon: Icon(
+              _busy
+                  ? Icons.close
+                  : (unlockCoolingDown ? Icons.check_circle : Icons.lock_open),
+            ),
+            label:
+                _busy
+                    ? const Text('Cancel')
+                    : (unlockCoolingDown
+                        ? _buildUnlockedButtonLabel(
+                          progressColor: onPrimaryProgressColor,
+                        )
+                        : const Text('Unlock now')),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
-            onPressed: _busy ? null : _unlockLocal,
-            icon: const Icon(Icons.wifi),
-            label: const Text('Local unlock'),
+            onPressed: unlockActionsDisabled ? null : _unlockLocal,
+            icon: Icon(unlockCoolingDown ? Icons.check_circle : Icons.wifi),
+            label:
+                unlockCoolingDown
+                    ? _buildUnlockedButtonLabel(
+                      progressColor: primaryProgressColor,
+                    )
+                    : const Text('Local unlock'),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(

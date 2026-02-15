@@ -13,6 +13,15 @@ class AppConfig {
     defaultValue: LocalFallbackDefaults.baseUrl,
   );
 
+  static const int unlockPulseMs = int.fromEnvironment(
+    'POOT_UNLOCK_PULSE_MS',
+    defaultValue: LocalFallbackDefaults.unlockPulseMs,
+  );
+
+  static const Duration unlockPulseDuration = Duration(
+    milliseconds: unlockPulseMs,
+  );
+
   static const Duration cloudAckTimeout = Duration(seconds: 6);
   static const Duration localRequestTimeout = Duration(seconds: 6);
 
