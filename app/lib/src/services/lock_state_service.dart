@@ -17,4 +17,9 @@ class LockStateService {
       return DeviceCloudState.fromRaw(event.snapshot.value);
     });
   }
+
+  Future<DeviceCloudState> fetchState() async {
+    final DataSnapshot snapshot = await _stateRef.get();
+    return DeviceCloudState.fromRaw(snapshot.value);
+  }
 }

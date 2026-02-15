@@ -313,6 +313,42 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _refreshDeviceState() async {
+    if (_busy) {
+      return;
+    }
+
+    try {
+      final DeviceCloudState state =
+          await widget.services.lockStateService.fetchState();
+      if (!mounted) {
+        return;
+      }
+
+      final bool online =
+          state.online && _isHeartbeatFresh(state.lastSeenEpochSec);
+      setState(() {
+        _statusSuccess = true;
+        _status =
+            online
+                ? 'Device state refreshed. Device is online.'
+                : 'Device state refreshed. Device is offline.';
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _statusSuccess = false;
+        _status = 'Failed to refresh device state.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to refresh device state.')),
+      );
+    }
+  }
+
   String _formatLastSeen(int? epochSec) {
     if (epochSec == null || epochSec <= 0) {
       return 'unknown';
@@ -421,61 +457,67 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: <Widget>[
-          Text(
-            widget.user.email ?? widget.user.uid,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          _buildDeviceStatusCard(),
-          const SizedBox(height: 12),
-          StatusBanner(message: _status, success: _statusSuccess),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed:
-                _busy ? _cancelUnlock : (unlockCoolingDown ? null : _unlock),
-            icon: Icon(
-              _busy
-                  ? Icons.close
-                  : (unlockCoolingDown ? Icons.check_circle : Icons.lock_open),
+      body: RefreshIndicator(
+        onRefresh: _refreshDeviceState,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(20),
+          children: <Widget>[
+            Text(
+              widget.user.email ?? widget.user.uid,
+              style: Theme.of(context).textTheme.titleMedium,
             ),
-            label:
+            const SizedBox(height: 8),
+            _buildDeviceStatusCard(),
+            const SizedBox(height: 12),
+            StatusBanner(message: _status, success: _statusSuccess),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed:
+                  _busy ? _cancelUnlock : (unlockCoolingDown ? null : _unlock),
+              icon: Icon(
                 _busy
-                    ? const Text('Cancel')
+                    ? Icons.close
                     : (unlockCoolingDown
-                        ? _buildUnlockedButtonLabel(
-                          progressColor: onPrimaryProgressColor,
-                        )
-                        : const Text('Unlock now')),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: unlockActionsDisabled ? null : _unlockLocal,
-            icon: Icon(unlockCoolingDown ? Icons.check_circle : Icons.wifi),
-            label:
-                unlockCoolingDown
-                    ? _buildUnlockedButtonLabel(
-                      progressColor: primaryProgressColor,
-                    )
-                    : const Text('Local unlock'),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _openSettings,
-            icon: const Icon(Icons.settings),
-            label: const Text('Local fallback settings'),
-          ),
-          if (_isAdmin) ...<Widget>[
+                        ? Icons.check_circle
+                        : Icons.lock_open),
+              ),
+              label:
+                  _busy
+                      ? const Text('Cancel')
+                      : (unlockCoolingDown
+                          ? _buildUnlockedButtonLabel(
+                            progressColor: onPrimaryProgressColor,
+                          )
+                          : const Text('Unlock now')),
+            ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: _busy ? null : _openAdmin,
-              icon: const Icon(Icons.group),
-              label: const Text('Cloud user access'),
+              onPressed: unlockActionsDisabled ? null : _unlockLocal,
+              icon: Icon(unlockCoolingDown ? Icons.check_circle : Icons.wifi),
+              label:
+                  unlockCoolingDown
+                      ? _buildUnlockedButtonLabel(
+                        progressColor: primaryProgressColor,
+                      )
+                      : const Text('Local unlock'),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _openSettings,
+              icon: const Icon(Icons.settings),
+              label: const Text('Local fallback settings'),
+            ),
+            if (_isAdmin) ...<Widget>[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : _openAdmin,
+                icon: const Icon(Icons.group),
+                label: const Text('Cloud user access'),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
