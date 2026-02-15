@@ -23,7 +23,7 @@ static constexpr uint32_t kStatusBlinkSlowMs = 700;
 static constexpr uint32_t kStatusBlinkFastMs = 180;
 static constexpr uint32_t kWiFiConnectingWindowMs = 8000;
 
-static constexpr uint32_t kUnlockPulseMs = 15000;
+static constexpr uint32_t kUnlockPulseMs = 5000;
 static constexpr uint32_t kUnlockCooldownMs = 5000;
 static constexpr uint32_t kCloudPollMs = 2500;
 static constexpr uint32_t kHeartbeatMs = 30000;
