@@ -2,20 +2,25 @@
 #include <ArduinoJson.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
-#include <time.h>
 
 #include "config.h"
 #include "diagnostics.h"
 #include "firebase_client.h"
-#include "local_unlock.h"
 #include "relay_control.h"
 #include "secrets.h"
-#include "storage.h"
 
-Storage storage;
 RelayController relay(poot::kRelayPin, poot::kRelayActiveLow);
 FirebaseClient firebase;
 ESP8266WebServer server(poot::kLocalHttpPort);
+
+const IPAddress kStaIp = WIFI_STA_IP;
+const IPAddress kStaGateway = WIFI_STA_GATEWAY;
+const IPAddress kStaSubnet = WIFI_STA_SUBNET;
+const IPAddress kStaDns1 = WIFI_STA_DNS1;
+const IPAddress kStaDns2 = WIFI_STA_DNS2;
+const IPAddress kApIp(192, 168, 4, 1);
+const IPAddress kApGateway(192, 168, 4, 1);
+const IPAddress kApSubnet(255, 255, 255, 0);
 
 String processedCommandIds[16];
 size_t processedCount = 0;
@@ -23,7 +28,7 @@ size_t processedCount = 0;
 uint32_t lastCloudPollMs = 0;
 uint32_t lastHeartbeatMs = 0;
 uint32_t lastWiFiReconnectMs = 0;
-uint32_t lastClockSyncMs = 0;
+uint32_t lastNetworkEnsureMs = 0;
 uint32_t lastWiFiBeginMs = 0;
 uint32_t wifiConnectedSinceMs = 0;
 uint32_t lastCloudHoldoffLogMs = 0;
@@ -32,10 +37,9 @@ uint32_t lastCloudPollFailureLogMs = 0;
 String lastCloudPollFailureReason;
 uint32_t lastHeartbeatSkipLogMs = 0;
 String lastHeartbeatSkipReason;
+bool serverRoutesRegistered = false;
+bool serverStarted = false;
 
-uint8_t buttonLastReading = HIGH;
-uint8_t buttonStableState = HIGH;
-uint32_t buttonLastEdgeMs = 0;
 wl_status_t lastWiFiStatus = WL_IDLE_STATUS;
 uint32_t lastWiFiStatusLogMs = 0;
 
@@ -216,53 +220,6 @@ void updateStatusLed() {
   }
 }
 
-void setupExitButton() {
-  pinMode(poot::kExitButtonPin, INPUT_PULLUP);
-  buttonStableState = digitalRead(poot::kExitButtonPin);
-  buttonLastReading = buttonStableState;
-  buttonLastEdgeMs = millis();
-  poot_diag::logf("BUTTON", "exit button initialized pin=%u activeLow=%u state=%u",
-                  poot::kExitButtonPin, poot::kExitButtonActiveLow ? 1 : 0,
-                  buttonStableState);
-}
-
-bool isButtonPressed(uint8_t state) {
-  if (poot::kExitButtonActiveLow) {
-    return state == LOW;
-  }
-  return state == HIGH;
-}
-
-void handleExitButton() {
-  const uint32_t nowMs = millis();
-  const uint8_t reading = digitalRead(poot::kExitButtonPin);
-
-  if (reading != buttonLastReading) {
-    buttonLastReading = reading;
-    buttonLastEdgeMs = nowMs;
-  }
-
-  if (nowMs - buttonLastEdgeMs < poot::kExitButtonDebounceMs) {
-    return;
-  }
-
-  if (buttonStableState == reading) {
-    return;
-  }
-
-  buttonStableState = reading;
-  if (!isButtonPressed(buttonStableState)) {
-    return;
-  }
-
-  poot_diag::logf("BUTTON", "press detected");
-  const bool fired =
-      relay.triggerPulse(poot::kUnlockPulseMs, poot::kUnlockCooldownMs);
-  poot_diag::logf("BUTTON", "unlock %s", fired ? "success" : "denied_cooldown");
-  firebase.writeAudit("unlock", "button", fired ? "success" : "denied",
-                      fired ? "ok" : "cooldown", "", "");
-}
-
 bool hasProcessedCommand(const String& commandId) {
   for (size_t i = 0; i < processedCount; i++) {
     if (processedCommandIds[i].equals(commandId)) {
@@ -284,30 +241,31 @@ void rememberProcessedCommand(const String& commandId) {
   processedCommandIds[15] = commandId;
 }
 
-uint32_t bestEffortNow() {
-  const time_t rtcNow = time(nullptr);
-  if (rtcNow > 100000) {
-    return static_cast<uint32_t>(rtcNow);
-  }
-  return local_unlock::approximateNow();
+bool configureStaNetwork() {
+  const bool configured =
+      WiFi.config(kStaIp, kStaGateway, kStaSubnet, kStaDns1, kStaDns2);
+  poot_diag::logf(
+      "WIFI",
+      "STA static ip config=%s ip=%s gateway=%s subnet=%s dns1=%s dns2=%s",
+      configured ? "ok" : "failed", kStaIp.toString().c_str(),
+      kStaGateway.toString().c_str(), kStaSubnet.toString().c_str(),
+      kStaDns1.toString().c_str(), kStaDns2.toString().c_str());
+  return configured;
 }
 
-void refreshClockAnchor() {
-  const uint32_t now = static_cast<uint32_t>(time(nullptr));
-  if (now > 100000) {
-    local_unlock::setClockAnchor(now);
-    poot_diag::logf("CLOCK", "NTP anchor refreshed now=%lu", now);
-  } else {
-    poot_diag::logf("CLOCK", "NTP not ready yet");
-  }
-}
-
-void connectSta() {
-  if (WiFi.status() == WL_CONNECTED) {
+void connectSta(bool forceReconnect = false) {
+  if (!forceReconnect && WiFi.status() == WL_CONNECTED) {
     return;
   }
 
+  if (forceReconnect) {
+    WiFi.disconnect(false);
+    yield();
+  }
+
+  configureStaNetwork();
   lastWiFiBeginMs = millis();
+  lastWiFiReconnectMs = lastWiFiBeginMs;
   poot_diag::logf("WIFI", "STA connecting to ssid=%s", WIFI_STA_SSID);
   WiFi.begin(WIFI_STA_SSID, WIFI_STA_PASSWORD);
 }
@@ -319,119 +277,119 @@ void sendJson(int code, const TDoc& doc) {
   server.send(code, "application/json", body);
 }
 
+void ensureHttpServer(bool forceRestart = false) {
+  if (!serverRoutesRegistered) {
+    server.on("/", HTTP_GET, []() {
+      poot_diag::logf("HTTP", "GET /");
+      server.send(200, "text/plain", "Poot lock online");
+    });
+
+    server.on("/api/local-unlock", HTTP_POST, []() {
+      StaticJsonDocument<256> response;
+      const String remoteIp = server.client().remoteIP().toString();
+      poot_diag::logf("LOCAL_HTTP", "POST /api/local-unlock from %s",
+                      remoteIp.c_str());
+
+      if (!server.hasArg("plain")) {
+        poot_diag::logf("LOCAL_HTTP", "bad_request: missing body");
+        response["ok"] = false;
+        response["code"] = "bad_request";
+        response["message"] = "Missing JSON body";
+        sendJson(400, response);
+        return;
+      }
+
+      StaticJsonDocument<160> requestDoc;
+      const auto err = deserializeJson(requestDoc, server.arg("plain"));
+      if (err) {
+        poot_diag::logf("LOCAL_HTTP", "bad_json: parse failed");
+        response["ok"] = false;
+        response["code"] = "bad_json";
+        response["message"] = "Could not parse JSON";
+        sendJson(400, response);
+        return;
+      }
+
+      const String key = requestDoc["key"] | "";
+      poot_diag::logf("LOCAL_HTTP", "request keyLen=%u", key.length());
+
+      if (key.isEmpty() || key != LOCAL_SHARED_KEY) {
+        poot_diag::logf("LOCAL_HTTP", "unlock denied reason=invalid_key");
+        firebase.writeAudit("unlock", "local", "denied", "invalid_key", "",
+                            "");
+        response["ok"] = false;
+        response["code"] = "invalid_key";
+        response["message"] = "Local unlock denied";
+        sendJson(401, response);
+        return;
+      }
+
+      const bool fired =
+          relay.triggerPulse(poot::kUnlockPulseMs, poot::kUnlockCooldownMs);
+      const String reason = fired ? "ok" : "cooldown";
+      poot_diag::logf("LOCAL_HTTP", "unlock %s",
+                      fired ? "success" : "denied_cooldown");
+      firebase.writeAudit("unlock", "local", fired ? "success" : "denied",
+                          reason, "", "");
+
+      response["ok"] = fired;
+      response["code"] = reason;
+      response["message"] = fired ? "Unlocked" : "Relay cooldown active";
+      sendJson(fired ? 200 : 429, response);
+    });
+
+    server.onNotFound([]() {
+      poot_diag::logf("HTTP", "404 %s", server.uri().c_str());
+      StaticJsonDocument<128> response;
+      response["ok"] = false;
+      response["code"] = "not_found";
+      response["message"] = "Route not found";
+      sendJson(404, response);
+    });
+
+    serverRoutesRegistered = true;
+  }
+
+  if (!serverStarted || forceRestart) {
+    server.begin();
+    serverStarted = true;
+    poot_diag::logf("HTTP", "server started on port=%u",
+                    poot::kLocalHttpPort);
+  }
+}
+
+bool ensureAccessPoint(bool forceRestart = false) {
+  bool shouldRestart = forceRestart;
+
+  if (WiFi.getMode() != WIFI_AP_STA) {
+    WiFi.mode(WIFI_AP_STA);
+    shouldRestart = true;
+    poot_diag::logf("WIFI", "mode restored to AP+STA");
+  }
+
+  if (WiFi.softAPIP() != kApIp) {
+    shouldRestart = true;
+  }
+
+  if (!shouldRestart) {
+    return false;
+  }
+
+  const bool apConfigured = WiFi.softAPConfig(kApIp, kApGateway, kApSubnet);
+  const bool apStarted =
+      WiFi.softAP(AP_SSID, AP_PASSWORD, poot::kApChannel, false,
+                  poot::kApMaxConnections);
+  poot_diag::logf("WIFI",
+                  "AP %s config=%s ssid=%s ip=%s channel=%u maxClients=%u",
+                  apStarted ? "started" : "failed",
+                  apConfigured ? "ok" : "failed", AP_SSID,
+                  WiFi.softAPIP().toString().c_str(), poot::kApChannel,
+                  poot::kApMaxConnections);
+  return true;
+}
+
 void handleLocalUnlock() {
-  StaticJsonDocument<256> response;
-  const String remoteIp = server.client().remoteIP().toString();
-  poot_diag::logf("LOCAL_HTTP", "POST /api/local-unlock from %s",
-                  remoteIp.c_str());
-
-  if (!server.hasArg("plain")) {
-    poot_diag::logf("LOCAL_HTTP", "bad_request: missing body");
-    response["ok"] = false;
-    response["code"] = "bad_request";
-    response["message"] = "Missing JSON body";
-    sendJson(400, response);
-    return;
-  }
-
-  StaticJsonDocument<256> requestDoc;
-  const auto err = deserializeJson(requestDoc, server.arg("plain"));
-  if (err) {
-    poot_diag::logf("LOCAL_HTTP", "bad_json: parse failed");
-    response["ok"] = false;
-    response["code"] = "bad_json";
-    response["message"] = "Could not parse JSON";
-    sendJson(400, response);
-    return;
-  }
-
-  LocalUnlockRequest req;
-  req.ts = requestDoc["ts"] | 0;
-  req.sig = requestDoc["sig"] | "";
-  poot_diag::logf("LOCAL_HTTP", "request ts=%lu sigLen=%u", req.ts,
-                  req.sig.length());
-
-  const ValidationResult validation = local_unlock::validate(req);
-  if (!validation.ok) {
-    poot_diag::logf("LOCAL_HTTP", "unlock denied reason=%s",
-                    validation.reason.c_str());
-    firebase.writeAudit("unlock", "local", "denied", validation.reason, "",
-                        "");
-    response["ok"] = false;
-    response["code"] = validation.reason;
-    response["message"] = "Local unlock denied";
-    sendJson(401, response);
-    return;
-  }
-
-  const bool fired = relay.triggerPulse(poot::kUnlockPulseMs, poot::kUnlockCooldownMs);
-  const String reason = fired ? "ok" : "cooldown";
-  poot_diag::logf("LOCAL_HTTP", "unlock %s", fired ? "success" : "denied_cooldown");
-  firebase.writeAudit("unlock", "local", fired ? "success" : "denied", reason,
-                      "", "");
-
-  response["ok"] = fired;
-  response["code"] = reason;
-  response["message"] = fired ? "Unlocked" : "Relay cooldown active";
-  sendJson(fired ? 200 : 429, response);
-}
-
-void handleLocalTime() {
-  StaticJsonDocument<192> response;
-
-  uint32_t nowSec = local_unlock::approximateNow();
-  if (nowSec > 0) {
-    poot_diag::logf("LOCAL_HTTP", "GET /api/local-time source=anchor now=%lu",
-                    nowSec);
-    response["ok"] = true;
-    response["ts"] = nowSec;
-    response["windowSec"] = poot::kTimestampWindowSec;
-    response["source"] = "anchor";
-    sendJson(200, response);
-    return;
-  }
-
-  const uint32_t rtcNow = static_cast<uint32_t>(time(nullptr));
-  if (rtcNow > 100000) {
-    // Keep local validator aligned with RTC when available.
-    local_unlock::setClockAnchor(rtcNow);
-    poot_diag::logf("LOCAL_HTTP", "GET /api/local-time source=rtc now=%lu",
-                    rtcNow);
-    response["ok"] = true;
-    response["ts"] = rtcNow;
-    response["windowSec"] = poot::kTimestampWindowSec;
-    response["source"] = "rtc";
-    sendJson(200, response);
-    return;
-  }
-
-  poot_diag::logf("LOCAL_HTTP", "GET /api/local-time failed: no_clock");
-  response["ok"] = false;
-  response["code"] = "no_clock";
-  response["message"] = "Device clock unavailable";
-  sendJson(503, response);
-}
-
-void setupServer() {
-  server.on("/", HTTP_GET, []() {
-    poot_diag::logf("HTTP", "GET /");
-    server.send(200, "text/plain", "Poot lock online");
-  });
-
-  server.on("/api/local-time", HTTP_GET, handleLocalTime);
-  server.on("/api/local-unlock", HTTP_POST, handleLocalUnlock);
-
-  server.onNotFound([]() {
-    poot_diag::logf("HTTP", "404 %s", server.uri().c_str());
-    StaticJsonDocument<128> response;
-    response["ok"] = false;
-    response["code"] = "not_found";
-    response["message"] = "Route not found";
-    sendJson(404, response);
-  });
-
-  server.begin();
-  poot_diag::logf("HTTP", "server started on port=%u", poot::kLocalHttpPort);
+  // Route handler is registered inline in ensureHttpServer().
 }
 
 void setupWiFi() {
@@ -441,32 +399,9 @@ void setupWiFi() {
   WiFi.mode(WIFI_AP_STA);
   poot_diag::logf("WIFI", "mode AP+STA");
 
-  const bool apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD, poot::kApChannel,
-                                     false, poot::kApMaxConnections);
-  poot_diag::logf("WIFI", "AP %s ssid=%s ip=%s channel=%u maxClients=%u",
-                  apStarted ? "started" : "failed", AP_SSID,
-                  WiFi.softAPIP().toString().c_str(), poot::kApChannel,
-                  poot::kApMaxConnections);
+  const bool apRestarted = ensureAccessPoint(true);
+  ensureHttpServer(apRestarted);
   connectSta();
-}
-
-bool isUnlockCommandFresh(const FirebaseCommand& cmd) {
-  if (cmd.expiresAt == 0) {
-    return true;
-  }
-
-  const uint32_t now = bestEffortNow();
-  if (now == 0) {
-    poot_diag::logf("CLOUD", "command=%s freshness check skipped (no clock)",
-                    cmd.commandId.c_str());
-    return true;
-  }
-  const bool fresh = now <= cmd.expiresAt;
-  if (!fresh) {
-    poot_diag::logf("CLOUD", "command=%s expired now=%lu expiresAt=%lu",
-                    cmd.commandId.c_str(), now, cmd.expiresAt);
-  }
-  return fresh;
 }
 
 void pollCloudCommands() {
@@ -508,21 +443,13 @@ void pollCloudCommands() {
       continue;
     }
     if (hasProcessedCommand(cmd.commandId)) {
-      if (!isUnlockCommandFresh(cmd)) {
-        const bool deleted = firebase.deleteCommand(cmd.commandId);
-        poot_diag::logf("CLOUD", "cleanup command=%s reason=expired_duplicate %s",
-                        cmd.commandId.c_str(),
-                        deleted ? "deleted" : "delete_failed");
-        handledCommand = true;
-        break;
-      }
       poot_diag::logf("CLOUD", "skip duplicate command=%s", cmd.commandId.c_str());
       continue;
     }
 
     rememberProcessedCommand(cmd.commandId);
-    poot_diag::logf("CLOUD", "process command=%s type=%s expiresAt=%lu uid=%s",
-                    cmd.commandId.c_str(), cmd.type.c_str(), cmd.expiresAt,
+    poot_diag::logf("CLOUD", "process command=%s type=%s uid=%s",
+                    cmd.commandId.c_str(), cmd.type.c_str(),
                     cmd.requestedByUid.c_str());
 
     if (!cmd.type.equalsIgnoreCase("unlock")) {
@@ -530,16 +457,6 @@ void pollCloudCommands() {
                       cmd.commandId.c_str());
       const bool deleted = firebase.deleteCommand(cmd.commandId);
       poot_diag::logf("CLOUD", "cleanup command=%s reason=unsupported_type %s",
-                      cmd.commandId.c_str(), deleted ? "deleted" : "delete_failed");
-      handledCommand = true;
-      break;
-    }
-
-    if (!isUnlockCommandFresh(cmd)) {
-      poot_diag::logf("CLOUD", "denied command=%s reason=command_expired",
-                      cmd.commandId.c_str());
-      const bool deleted = firebase.deleteCommand(cmd.commandId);
-      poot_diag::logf("CLOUD", "cleanup command=%s reason=command_expired %s",
                       cmd.commandId.c_str(), deleted ? "deleted" : "delete_failed");
       handledCommand = true;
       break;
@@ -601,29 +518,36 @@ void publishHeartbeat() {
   }
 }
 
-void maybeReconnectWiFi() {
+void ensureNetworkStack() {
+  const uint32_t nowMs = millis();
+  if (nowMs - lastNetworkEnsureMs < poot::kNetworkEnsureMs) {
+    return;
+  }
+  lastNetworkEnsureMs = nowMs;
+
+  const bool apRestarted = ensureAccessPoint();
+  if (apRestarted) {
+    ensureHttpServer(true);
+  } else if (!serverStarted) {
+    ensureHttpServer();
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.localIP() != kStaIp) {
+      poot_diag::logf("WIFI", "STA ip mismatch expected=%s actual=%s",
+                      kStaIp.toString().c_str(),
+                      WiFi.localIP().toString().c_str());
+      connectSta(true);
+    }
     return;
   }
 
-  const uint32_t nowMs = millis();
   if (nowMs - lastWiFiReconnectMs < poot::kWiFiReconnectMs) {
     return;
   }
 
-  lastWiFiReconnectMs = nowMs;
   poot_diag::logf("WIFI", "reconnect attempt");
-  connectSta();
-}
-
-void maybeSyncClock() {
-  const uint32_t nowMs = millis();
-  if (nowMs - lastClockSyncMs < 60000) {
-    return;
-  }
-  lastClockSyncMs = nowMs;
-
-  refreshClockAnchor();
+  connectSta(true);
 }
 
 void setup() {
@@ -648,26 +572,12 @@ void setup() {
   poot_diag::logf("BOOT", "random seed initialized");
 
   setupStatusLed();
-  setupExitButton();
-  const bool storageReady = storage.begin();
-  poot_diag::logf("BOOT", "storage=%s", storageReady ? "ok" : "failed");
-  firebase.setStorage(&storage);
-  poot_diag::logf("BOOT", "local timestamp window=%lu s",
-                  poot::kTimestampWindowSec);
-  poot_diag::logf("BOOT", "persisted cloud cooldown until=%lu",
-                  firebase.cloudCooldownUntilEpoch());
   relay.begin();
-
-  local_unlock::begin(&storage, LOCAL_SHARED_SECRET, poot::kTimestampWindowSec,
-                      poot::kReplayRetentionSec, poot::kReplayCacheSize);
+  poot_diag::logf("BOOT", "local auth=shared_key");
+  poot_diag::logf("BOOT", "fixed STA ip=%s AP ip=%s",
+                  kStaIp.toString().c_str(), kApIp.toString().c_str());
 
   setupWiFi();
-
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-  poot_diag::logf("CLOCK", "NTP configured");
-  refreshClockAnchor();
-
-  setupServer();
   const bool firebaseReady = firebase.begin();
   poot_diag::logf("BOOT", "firebase=%s", firebaseReady ? "ok" : "failed");
 }
@@ -675,11 +585,9 @@ void setup() {
 void loop() {
   server.handleClient();
   relay.loop();
-  handleExitButton();
 
   logWiFiStatusIfChanged();
-  maybeReconnectWiFi();
-  maybeSyncClock();
+  ensureNetworkStack();
   pollCloudCommands();
   publishHeartbeat();
   updateStatusLed();

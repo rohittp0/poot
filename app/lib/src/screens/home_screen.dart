@@ -232,8 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _statusSuccess = true;
     });
 
-    final local =
-        await widget.services.localUnlockService.unlockViaAccessPoint();
+    final local = await widget.services.localUnlockService.unlockLocally();
 
     if (!mounted || attemptId != _unlockAttemptId) {
       return;
@@ -244,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ? const UnlockResult(
               success: true,
               path: UnlockPath.local,
-              message: 'Unlocked through local hotspot fallback.',
+              message: 'Unlocked through local network fallback.',
             )
             : UnlockResult(
               success: false,

@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:wifi_iot/wifi_iot.dart';
 
@@ -15,18 +14,6 @@ class LocalUnlockResult {
   const LocalUnlockResult({required this.success, required this.reason});
 
   final bool success;
-  final String reason;
-}
-
-class _LocalTimeSyncResult {
-  const _LocalTimeSyncResult({
-    required this.success,
-    this.ts,
-    required this.reason,
-  });
-
-  final bool success;
-  final int? ts;
   final String reason;
 }
 
@@ -43,7 +30,7 @@ class LocalUnlockService {
   final Connectivity _connectivity;
   final http.Client _httpClient;
 
-  Future<LocalUnlockResult> unlockViaAccessPoint() async {
+  Future<LocalUnlockResult> unlockLocally() async {
     final LocalUnlockSettings settings = await _settingsService.readSettings();
     if (!settings.isConfigured) {
       return const LocalUnlockResult(
@@ -52,44 +39,21 @@ class LocalUnlockService {
       );
     }
 
+    final LocalUnlockResult lanAttempt = await _postLocalUnlock(
+      uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
+      sharedKey: settings.sharedKey,
+    );
+    if (lanAttempt.success || !_isTransportFailure(lanAttempt.reason)) {
+      return lanAttempt;
+    }
+
     await _bestEffortConnect(settings);
 
-    final Uri uri = Uri.parse('${settings.baseUrl}/api/local-unlock');
-    final Uri localTimeUri = Uri.parse('${settings.baseUrl}/api/local-time');
-
     try {
-      final int firstTs = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final LocalUnlockResult firstAttempt = await _postLocalUnlock(
-        uri: uri,
-        ts: firstTs,
-        sig: _signTimestamp(settings.sharedSecret, firstTs),
+      return await _postLocalUnlock(
+        uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
+        sharedKey: settings.sharedKey,
       );
-
-      if (firstAttempt.success ||
-          firstAttempt.reason != 'timestamp_out_of_window') {
-        return firstAttempt;
-      }
-
-      final _LocalTimeSyncResult localTime = await _fetchLocalTime(
-        uri: localTimeUri,
-      );
-      if (!localTime.success || localTime.ts == null) {
-        return LocalUnlockResult(success: false, reason: localTime.reason);
-      }
-
-      final LocalUnlockResult retryAttempt = await _postLocalUnlock(
-        uri: uri,
-        ts: localTime.ts!,
-        sig: _signTimestamp(settings.sharedSecret, localTime.ts!),
-      );
-      if (!retryAttempt.success &&
-          retryAttempt.reason == 'timestamp_out_of_window') {
-        return const LocalUnlockResult(
-          success: false,
-          reason: 'local_time_sync_failed',
-        );
-      }
-      return retryAttempt;
     } finally {
       if (Platform.isAndroid) {
         await WiFiForIoTPlugin.forceWifiUsage(false);
@@ -99,15 +63,14 @@ class LocalUnlockService {
 
   Future<LocalUnlockResult> _postLocalUnlock({
     required Uri uri,
-    required int ts,
-    required String sig,
+    required String sharedKey,
   }) async {
     try {
       final http.Response response = await _httpClient
           .post(
             uri,
             headers: const <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(<String, Object>{'ts': ts, 'sig': sig}),
+            body: jsonEncode(<String, Object>{'key': sharedKey}),
           )
           .timeout(AppConfig.localRequestTimeout);
 
@@ -138,50 +101,8 @@ class LocalUnlockService {
     }
   }
 
-  Future<_LocalTimeSyncResult> _fetchLocalTime({required Uri uri}) async {
-    try {
-      final http.Response response = await _httpClient
-          .get(uri)
-          .timeout(AppConfig.localRequestTimeout);
-
-      Map<String, dynamic>? body;
-      try {
-        body = jsonDecode(response.body) as Map<String, dynamic>;
-      } catch (_) {
-        body = null;
-      }
-
-      if (response.statusCode >= 200 &&
-          response.statusCode < 300 &&
-          body != null &&
-          body['ok'] == true &&
-          body['ts'] is num) {
-        return _LocalTimeSyncResult(
-          success: true,
-          ts: (body['ts'] as num).toInt(),
-          reason: 'ok',
-        );
-      }
-
-      if (response.statusCode == 503 &&
-          body != null &&
-          (body['code'] ?? '').toString() == 'no_clock') {
-        return const _LocalTimeSyncResult(
-          success: false,
-          reason: 'no_clock',
-        );
-      }
-
-      return const _LocalTimeSyncResult(
-        success: false,
-        reason: 'local_time_sync_failed',
-      );
-    } catch (_) {
-      return const _LocalTimeSyncResult(
-        success: false,
-        reason: 'local_time_sync_failed',
-      );
-    }
+  bool _isTransportFailure(String reason) {
+    return reason == 'local_timeout' || reason == 'local_request_failed';
   }
 
   Future<void> _bestEffortConnect(LocalUnlockSettings settings) async {
@@ -222,10 +143,5 @@ class LocalUnlockService {
     if (!status.contains(ConnectivityResult.wifi)) {
       await Future<void>.delayed(const Duration(seconds: 1));
     }
-  }
-
-  String _signTimestamp(String sharedSecret, int ts) {
-    final Hmac hmac = Hmac(sha256, utf8.encode(sharedSecret));
-    return hmac.convert(utf8.encode(ts.toString())).toString();
   }
 }

@@ -5,12 +5,10 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecureBearSSL.h>
 #include <new>
-#include <time.h>
 
 #include "config.h"
 #include "diagnostics.h"
 #include "secrets.h"
-#include "storage.h"
 
 namespace {
 
@@ -70,92 +68,8 @@ static const uint16_t kPootTlsSuites[] PROGMEM = {
 
 }  // namespace
 
-void FirebaseClient::setStorage(Storage* storage) {
-  storage_ = storage;
-  loadPersistedCooldown();
-}
-
-uint32_t FirebaseClient::cloudCooldownUntilEpoch() const {
-  return cloudCooldownUntilEpoch_;
-}
-
-void FirebaseClient::loadPersistedCooldown() {
-  cooldownLoaded_ = true;
-  cloudCooldownUntilEpoch_ = 0;
-  fallbackClockAnchorEpoch_ = 0;
-  fallbackClockAnchorMillis_ = millis();
-
-  if (storage_ == nullptr) {
-    return;
-  }
-
-  uint32_t cooldownUntil = 0;
-  if (storage_->loadCloudCooldownUntil(cooldownUntil)) {
-    cloudCooldownUntilEpoch_ = cooldownUntil;
-  }
-
-  uint32_t clockAnchor = 0;
-  if (storage_->loadClockAnchor(clockAnchor)) {
-    fallbackClockAnchorEpoch_ = clockAnchor;
-    fallbackClockAnchorMillis_ = millis();
-  }
-
-  poot_diag::logf("FIREBASE", "loaded cooldownUntil=%lu fallbackAnchor=%lu",
-                  cloudCooldownUntilEpoch_, fallbackClockAnchorEpoch_);
-}
-
-uint32_t FirebaseClient::effectiveNowEpoch() const {
-  const uint32_t now = static_cast<uint32_t>(time(nullptr));
-  if (now > 100000) {
-    return now;
-  }
-
-  if (fallbackClockAnchorEpoch_ > 100000) {
-    const uint32_t elapsed = (millis() - fallbackClockAnchorMillis_) / 1000;
-    return fallbackClockAnchorEpoch_ + elapsed;
-  }
-
-  return 0;
-}
-
-bool FirebaseClient::cooldownActive(uint32_t nowEpoch) const {
-  if (cloudCooldownUntilEpoch_ == 0) {
-    return false;
-  }
-  if (nowEpoch == 0) {
-    return true;
-  }
-  return nowEpoch < cloudCooldownUntilEpoch_;
-}
-
-void FirebaseClient::setCloudCooldownUntil(uint32_t untilEpoch,
-                                           const char* reason) {
-  cloudCooldownUntilEpoch_ = untilEpoch;
-  if (storage_ != nullptr) {
-    storage_->saveCloudCooldownUntil(cloudCooldownUntilEpoch_);
-  }
-  poot_diag::logf("FIREBASE", "cooldown until=%lu reason=%s",
-                  cloudCooldownUntilEpoch_, reason);
-}
-
-void FirebaseClient::clearCloudCooldown() {
-  if (cloudCooldownUntilEpoch_ == 0) {
-    return;
-  }
-
-  cloudCooldownUntilEpoch_ = 0;
-  if (storage_ != nullptr) {
-    storage_->saveCloudCooldownUntil(0);
-  }
-  poot_diag::logf("FIREBASE", "cooldown cleared");
-}
-
 bool FirebaseClient::begin() {
   poot_diag::logf("FIREBASE", "client begin");
-
-  if (!cooldownLoaded_) {
-    loadPersistedCooldown();
-  }
 
   if (WiFi.status() != WL_CONNECTED) {
     lastError_ = "wifi_disconnected";
@@ -169,18 +83,8 @@ bool FirebaseClient::begin() {
 }
 
 bool FirebaseClient::ensureSignedIn(bool allowActiveAuth) {
-  if (!cooldownLoaded_) {
-    loadPersistedCooldown();
-  }
-
   if (WiFi.status() != WL_CONNECTED) {
     lastError_ = "wifi_disconnected";
-    return false;
-  }
-
-  const uint32_t nowEpoch = effectiveNowEpoch();
-  if (cooldownActive(nowEpoch)) {
-    lastError_ = "auth_backoff";
     return false;
   }
 
@@ -203,29 +107,6 @@ bool FirebaseClient::ensureSignedIn(bool allowActiveAuth) {
     poot_diag::logf("FIREBASE", "no id token, signing in");
     const bool ok = signInWithPassword();
     recordAuthResult(ok, "sign-in");
-    return ok;
-  }
-
-  if (tokenExpiringSoon()) {
-    if (!allowActiveAuth) {
-      lastError_ = "auth_refresh_required";
-      return false;
-    }
-    poot_diag::logf("FIREBASE", "id token expiring soon, refreshing");
-    if (refreshToken_.isEmpty()) {
-      poot_diag::logf("FIREBASE", "refresh token missing, signing in");
-      const bool ok = signInWithPassword();
-      recordAuthResult(ok, "sign-in");
-      return ok;
-    }
-
-    const bool ok = refreshIdToken();
-    recordAuthResult(ok, "refresh");
-    if (!ok) {
-      // Retry with full sign-in on the next poll cycle.
-      idToken_ = "";
-      poot_diag::logf("FIREBASE", "refresh failed, sign-in deferred");
-    }
     return ok;
   }
 
@@ -260,9 +141,6 @@ bool FirebaseClient::shouldSkipCloudWrites() const {
   if (authBackoffActive(nowMs)) {
     return true;
   }
-  if (cooldownActive(effectiveNowEpoch())) {
-    return true;
-  }
   return false;
 }
 
@@ -286,7 +164,6 @@ void FirebaseClient::recordAuthResult(bool success, const char* opName) {
     nextAuthAttemptMs_ = 0;
     authBackoffMs_ = poot::kFirebaseAuthRetryInitialMs;
     credentialsRejected_ = false;
-    clearCloudCooldown();
     return;
   }
 
@@ -304,15 +181,25 @@ void FirebaseClient::recordAuthResult(bool success, const char* opName) {
   }
 }
 
+void FirebaseClient::handleUnauthorizedResponse(int httpCode, const String& body,
+                                                const char* scope) {
+  idToken_ = "";
+  lastError_ = "unauthorized";
+  applyAuthBackoffMs(poot::kFirebaseUnauthorizedBackoffMs, "unauthorized");
+
+  const String fbErr = extractFirebaseError(body);
+  poot_diag::logf("FIREBASE", "%s unauthorized http=%d err=%s", scope, httpCode,
+                  fbErr.isEmpty() ? "unknown" : fbErr.c_str());
+}
+
 bool FirebaseClient::pollCommands(FirebasePollResult& out) {
   out = FirebasePollResult{};
 
   if (!ensureSignedIn(true)) {
     out.error = lastError_;
     if (!(out.error == "auth_backoff" || out.error == "secure_spacing" ||
-          out.error == "low_heap" ||
-          out.error == "wifi_disconnected" || out.error == "auth_required" ||
-          out.error == "auth_refresh_required")) {
+          out.error == "low_heap" || out.error == "wifi_disconnected" ||
+          out.error == "auth_required")) {
       poot_diag::logf("FIREBASE", "poll denied, not signed in: %s",
                       out.error.c_str());
     }
@@ -337,25 +224,8 @@ bool FirebaseClient::pollCommands(FirebasePollResult& out) {
   }
 
   if (httpCode == 401 || httpCode == 403) {
-    const String fbErr = extractFirebaseError(body);
-    idToken_ = "";
-    refreshToken_ = "";
-    tokenExpiryEpoch_ = 0;
-    lastError_ = "unauthorized";
-    const uint32_t nowEpoch = effectiveNowEpoch();
-    if (nowEpoch > 100000) {
-      setCloudCooldownUntil(
-          nowEpoch + (poot::kFirebaseUnauthorizedBackoffMs / 1000),
-          "unauthorized");
-    } else {
-      poot_diag::logf(
-          "FIREBASE",
-          "unauthorized cooldown not persisted (no clock), using RAM backoff only");
-    }
-    applyAuthBackoffMs(poot::kFirebaseUnauthorizedBackoffMs, "unauthorized");
+    handleUnauthorizedResponse(httpCode, body, "poll");
     out.error = "unauthorized";
-    poot_diag::logf("FIREBASE", "poll unauthorized http=%d err=%s", httpCode,
-                    fbErr.isEmpty() ? "unknown" : fbErr.c_str());
     return false;
   }
 
@@ -417,7 +287,8 @@ bool FirebaseClient::patchState(bool online, const String& relayState,
 
   StaticJsonDocument<256> doc;
   doc["online"] = online;
-  doc["lastSeen"] = static_cast<uint32_t>(time(nullptr));
+  JsonObject lastSeen = doc.createNestedObject("lastSeen");
+  lastSeen[".sv"] = "timestamp";
   doc["relayState"] = relayState;
   doc["fwVersion"] = fwVersion;
 
@@ -435,7 +306,13 @@ bool FirebaseClient::patchState(bool online, const String& relayState,
     return false;
   }
 
+  if (code == 401 || code == 403) {
+    handleUnauthorizedResponse(code, body, "patch_state");
+    return false;
+  }
+
   if (code >= 200 && code < 300) {
+    lastError_ = "";
     poot_diag::logf("FIREBASE", "patch state ok");
     return true;
   }
@@ -467,7 +344,13 @@ bool FirebaseClient::deleteCommand(const String& commandId) {
     return false;
   }
 
+  if (code == 401 || code == 403) {
+    handleUnauthorizedResponse(code, body, "delete_command");
+    return false;
+  }
+
   if (code >= 200 && code < 300) {
+    lastError_ = "";
     poot_diag::logf("FIREBASE", "delete command ok id=%s", commandId.c_str());
     return true;
   }
@@ -492,7 +375,8 @@ bool FirebaseClient::writeAudit(const String& action, const String& channel,
                          String(random(1000, 9999));
 
   StaticJsonDocument<384> doc;
-  doc["ts"] = static_cast<uint32_t>(time(nullptr));
+  JsonObject ts = doc.createNestedObject("ts");
+  ts[".sv"] = "timestamp";
   doc["action"] = action;
   doc["channel"] = channel;
   doc["result"] = result;
@@ -514,7 +398,13 @@ bool FirebaseClient::writeAudit(const String& action, const String& channel,
     return false;
   }
 
+  if (code == 401 || code == 403) {
+    handleUnauthorizedResponse(code, body, "write_audit");
+    return false;
+  }
+
   if (code >= 200 && code < 300) {
+    lastError_ = "";
     poot_diag::logf("FIREBASE", "audit ok action=%s channel=%s result=%s",
                     action.c_str(), channel.c_str(), result.c_str());
     return true;
@@ -556,14 +446,6 @@ bool FirebaseClient::signInWithPassword() {
       lastError_ = "auth_rate_limited";
       credentialsRejected_ = false;
       authBackoffMs_ = poot::kFirebaseRateLimitBackoffMs;
-      const uint32_t nowEpoch = effectiveNowEpoch();
-      if (nowEpoch > 100000) {
-        setCloudCooldownUntil(
-            nowEpoch + (poot::kFirebaseRateLimitBackoffMs / 1000),
-            "rate_limited");
-      } else {
-        poot_diag::logf("FIREBASE", "rate limit cooldown not persisted (no clock)");
-      }
     } else if (code == 400 &&
                (fbErr.isEmpty() || isFirebaseCredentialError(fbErr))) {
       lastError_ = "invalid_device_credentials";
@@ -586,15 +468,6 @@ bool FirebaseClient::signInWithPassword() {
   }
 
   idToken_ = response["idToken"] | "";
-  refreshToken_ = response["refreshToken"] | "";
-  const uint32_t expiresInSec = String(response["expiresIn"] | "3600").toInt();
-
-  const uint32_t now = static_cast<uint32_t>(time(nullptr));
-  if (now > 100000) {
-    tokenExpiryEpoch_ = now + expiresInSec;
-  } else {
-    tokenExpiryEpoch_ = 0;
-  }
 
   if (idToken_.isEmpty()) {
     lastError_ = "missing_id_token";
@@ -605,82 +478,6 @@ bool FirebaseClient::signInWithPassword() {
   lastError_ = "";
   poot_diag::logf("FIREBASE", "sign-in success");
   return true;
-}
-
-bool FirebaseClient::refreshIdToken() {
-  if (refreshToken_.isEmpty()) {
-    lastError_ = "missing_refresh_token";
-    poot_diag::logf("FIREBASE", "refresh skipped: no refresh token");
-    return false;
-  }
-
-  poot_diag::logf("FIREBASE", "refreshing id token");
-
-  const String payload = String("grant_type=refresh_token&refresh_token=") +
-                         refreshToken_;
-
-  const String url = String("https://securetoken.googleapis.com/v1/token?key=") +
-                     FIREBASE_API_KEY;
-
-  String body;
-  int code = 0;
-  if (!doJsonRequest("POST", url, payload, body, code, true,
-                     "application/x-www-form-urlencoded")) {
-    poot_diag::logf("FIREBASE", "refresh request failed: %s",
-                    lastError_.c_str());
-    return false;
-  }
-
-  if (code < 200 || code >= 300) {
-    lastError_ = "refresh_failed_" + String(code);
-    const String fbErr = extractFirebaseError(body);
-    poot_diag::logf("FIREBASE", "refresh failed http=%d err=%s", code,
-                    fbErr.isEmpty() ? "unknown" : fbErr.c_str());
-    return false;
-  }
-
-  DynamicJsonDocument response(2048);
-  const auto err = deserializeJson(response, body);
-  if (err) {
-    lastError_ = "refresh_json_invalid";
-    poot_diag::logf("FIREBASE", "refresh failed: invalid JSON response");
-    return false;
-  }
-
-  idToken_ = response["id_token"] | "";
-  refreshToken_ = response["refresh_token"] | "";
-  const uint32_t expiresInSec = String(response["expires_in"] | "3600").toInt();
-
-  const uint32_t now = static_cast<uint32_t>(time(nullptr));
-  if (now > 100000) {
-    tokenExpiryEpoch_ = now + expiresInSec;
-  } else {
-    tokenExpiryEpoch_ = 0;
-  }
-
-  const bool ok = !idToken_.isEmpty();
-  if (ok) {
-    lastError_ = "";
-  }
-  poot_diag::logf("FIREBASE", "refresh %s", ok ? "success" : "failed");
-  return ok;
-}
-
-bool FirebaseClient::tokenExpiringSoon() const {
-  if (idToken_.isEmpty()) {
-    return true;
-  }
-
-  if (tokenExpiryEpoch_ == 0) {
-    return false;
-  }
-
-  const uint32_t now = static_cast<uint32_t>(time(nullptr));
-  if (now < 100000) {
-    return false;
-  }
-
-  return now + poot::kFirebaseTokenRefreshSkewSec >= tokenExpiryEpoch_;
 }
 
 bool FirebaseClient::doJsonRequest(const String& method, const String& url,
@@ -712,11 +509,6 @@ bool FirebaseClient::doJsonRequest(const String& method, const String& url,
                  maxBlock < poot::kFirebaseMinMaxBlockBytes)) {
     lastError_ = "low_heap";
     applyAuthBackoffMs(poot::kFirebaseLowHeapBackoffMs, "low_heap");
-    const uint32_t nowEpoch = effectiveNowEpoch();
-    if (nowEpoch > 100000) {
-      setCloudCooldownUntil(nowEpoch + (poot::kFirebaseLowHeapBackoffMs / 1000),
-                            "low_heap");
-    }
     poot_diag::logf(
         "FIREBASE",
         "skip secure request: low heap free=%lu maxBlock=%lu minFree=%lu minBlock=%lu",

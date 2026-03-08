@@ -726,6 +726,11 @@ cat > "$SECRETS_FILE" <<SECRETS
 
 #define WIFI_STA_SSID "$wifi_ssid_escaped"
 #define WIFI_STA_PASSWORD "$wifi_password_escaped"
+#define WIFI_STA_IP IPAddress(192, 168, 1, 192)
+#define WIFI_STA_GATEWAY IPAddress(192, 168, 1, 1)
+#define WIFI_STA_SUBNET IPAddress(255, 255, 255, 0)
+#define WIFI_STA_DNS1 IPAddress(192, 168, 1, 1)
+#define WIFI_STA_DNS2 IPAddress(8, 8, 8, 8)
 
 #define AP_SSID "$ap_ssid_escaped"
 #define AP_PASSWORD "$ap_password_escaped"
@@ -736,7 +741,7 @@ cat > "$SECRETS_FILE" <<SECRETS
 #define FIREBASE_DEVICE_PASSWORD "$device_password_escaped"
 
 #define LOCK_ID "$lock_id_escaped"
-#define LOCAL_SHARED_SECRET "$local_secret_escaped"
+#define LOCAL_SHARED_KEY "$local_secret_escaped"
 SECRETS
 
 cat > "$FLUTTER_LOCAL_DEFAULTS_FILE" <<DARTCFG
@@ -746,10 +751,11 @@ class LocalFallbackDefaults {
   const LocalFallbackDefaults._();
 
   static const String lockId = '$lock_id_dart_escaped';
-  static const String baseUrl = 'http://192.168.4.1';
+  static const String baseUrl = 'http://192.168.1.192';
+  static const String hotspotBaseUrl = 'http://192.168.4.1';
   static const String espSsid = '$ap_ssid_dart_escaped';
   static const String espPassword = '$ap_password_dart_escaped';
-  static const String sharedSecret = '$local_secret_dart_escaped';
+  static const String sharedKey = '$local_secret_dart_escaped';
   static const int unlockPulseMs = $unlock_pulse_ms;
 }
 DARTCFG
@@ -766,13 +772,14 @@ echo "Android signing SHA1: $android_sha1"
 echo "Android signing SHA256: $android_sha256"
 echo "Generated fallback AP SSID: $ap_ssid"
 echo "Generated fallback AP password: $ap_password"
+echo "Generated fixed LAN URL: http://192.168.1.192"
 echo "Firebase DB URL: $db_url"
 echo "Firebase API key (from FlutterFire): ${api_key:0:10}..."
 echo "Firebase device email: $device_email"
 echo "Firebase device password: $device_password"
 echo "Firebase device UID: ${device_uid:-not_found}"
 echo "Device account seed status: $device_account_seed_status"
-echo "Generated LOCAL_SHARED_SECRET: $local_secret"
+echo "Generated LOCAL_SHARED_KEY: $local_secret"
 echo "Firebase SHA1 registration: $android_sha1_register_status"
 echo "Firebase SHA256 registration: $android_sha256_register_status"
 echo "google-services.json refresh: $android_google_services_refresh_status"

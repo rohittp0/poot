@@ -10,8 +10,6 @@ Arduino IDE firmware for ESP8266 NodeMCU smart lock control.
 - `secrets.h`: local credentials (fill before flashing)
 - `firebase_client.*`: Firebase Auth + Realtime DB REST
 - `relay_control.*`: relay pulse + cooldown
-- `local_unlock.*`: local HMAC/timestamp/replay validation
-- `storage.*`: LittleFS persistence for clock anchor and replay cache
 - `WIRING.md`: full wiring diagram and pin mapping (Mermaid + SVG/PNG)
 
 ## Required Arduino libraries
@@ -23,14 +21,13 @@ Use ESP8266 board package (contains):
 - `ESP8266WiFi`
 - `ESP8266WebServer`
 - `ESP8266HTTPClient`
-- `LittleFS`
 - `BearSSL`
 
 ## Build target
 
 - Board: `NodeMCU 1.0 (ESP-12E Module)`
 - CPU Frequency: `80 MHz` (default is fine)
-- Flash Size: `4MB (FS:2MB OTA:~1019KB)` or similar with LittleFS enabled
+- Flash Size: `4MB (FS:2MB OTA:~1019KB)` or similar
 
 ## Credential setup
 
@@ -46,7 +43,7 @@ What `./init.sh` does:
 - Uses Firebase CLI (if available) to detect Realtime Database URL.
 - Generates `secrets.h` for NodeMCU.
 - Generates Flutter fallback defaults in `app/lib/src/config/local_fallback_defaults.dart`.
-- Auto-generates and prints AP password + shared HMAC secret.
+- Auto-generates and prints AP password + shared local key.
 - Auto-generates Firebase device password and can create Firebase Auth device user.
 
 Manual alternative:
@@ -57,40 +54,28 @@ cp secrets.example.h secrets.h
 
 Set:
 - Home Wi-Fi STA credentials
+- Home Wi-Fi static IP defaults (`192.168.1.192`)
 - AP SSID/password (always-on fallback AP)
 - Firebase API key, DB URL, device account credentials
 - `LOCK_ID`
-- `LOCAL_SHARED_SECRET`
+- `LOCAL_SHARED_KEY`
 
 ## Local unlock contract
 
-Endpoint on ESP AP:
-- `GET /api/local-time`
-- `POST /api/local-unlock`
-
-`GET /api/local-time` response:
-
-```json
-{
-  "ok": true,
-  "ts": 1739401200,
-  "windowSec": 300,
-  "source": "anchor"
-}
-```
+Endpoints:
+- `POST http://192.168.1.192/api/local-unlock`
+- `POST http://192.168.4.1/api/local-unlock`
 
 JSON body:
 
 ```json
 {
-  "ts": 1739401200,
-  "sig": "hex_hmac_sha256(sharedSecret, ts)"
+  "key": "shared_local_key"
 }
 ```
 
 Validation:
-- timestamp window (`+/-300s`)
-- replay protection using recent signature cache
+- direct shared-key match
 
 ## Device account authorization
 
@@ -111,13 +96,6 @@ identity aligned with firmware credentials.
 - Boot state: locked
 - Unlock mode: pulse (default `900ms`)
 - Cooldown: `5000ms`
-
-## Inside button unlock
-
-- Button pin: `D5` (`kExitButtonPin` in `config.h`)
-- Wiring: one side of push button to `D5`, other side to `GND`
-- Logic: `INPUT_PULLUP`, press drives pin LOW
-- Action: debounced press triggers same unlock pulse as cloud/local unlock
 
 ## Wiring diagram
 
@@ -141,9 +119,7 @@ identity aligned with firmware credentials.
 
 - Open Serial Monitor at `115200` baud.
 - Firmware prints tagged diagnostics for boot, Wi-Fi/AP, HTTP local unlock,
-  relay/button actions, local validation failures, Firebase auth/polling,
-  heartbeat, audit writes, and clock sync.
-- Firmware now serializes auth attempts, enforces secure-request spacing, and
-  persists cloud cooldown to avoid auth crash loops during outages/rate limits.
+  relay actions, Firebase auth/polling, heartbeat, and audit writes.
+- Firmware keeps the hotspot and local HTTP server available while STA/cloud
+  reconnect logic runs independently.
 - Toggle logs via `kEnableSerialDiagnostics` in `config.h`.
-

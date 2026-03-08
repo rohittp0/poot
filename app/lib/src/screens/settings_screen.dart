@@ -18,6 +18,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _secretController = TextEditingController();
   final TextEditingController _baseUrlController = TextEditingController();
 
+  String _hotspotBaseUrl = '';
   bool _loading = true;
   bool _saving = false;
   bool _showPassword = false;
@@ -34,8 +35,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await widget.settingsService.readSettings();
     _ssidController.text = settings.espSsid;
     _passwordController.text = settings.espPassword;
-    _secretController.text = settings.sharedSecret;
+    _secretController.text = settings.sharedKey;
     _baseUrlController.text = settings.baseUrl;
+    _hotspotBaseUrl = settings.hotspotBaseUrl;
     if (mounted) {
       setState(() {
         _loading = false;
@@ -51,8 +53,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final LocalUnlockSettings settings = LocalUnlockSettings(
       espSsid: _ssidController.text,
       espPassword: _passwordController.text,
-      sharedSecret: _secretController.text,
+      sharedKey: _secretController.text,
       baseUrl: _baseUrlController.text,
+      hotspotBaseUrl: _hotspotBaseUrl,
     );
 
     await widget.settingsService.saveSettings(settings);
@@ -111,8 +114,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _ssidController.text = settings.espSsid;
       _passwordController.text = settings.espPassword;
-      _secretController.text = settings.sharedSecret;
+      _secretController.text = settings.sharedKey;
       _baseUrlController.text = settings.baseUrl;
+      _hotspotBaseUrl = settings.hotspotBaseUrl;
       _showPassword = false;
       _showSharedSecret = false;
       _saving = false;
@@ -181,7 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   TextField(
                     controller: _secretController,
                     decoration: InputDecoration(
-                      labelText: 'Shared HMAC secret',
+                      labelText: 'Shared key',
                       suffixIcon: IconButton(
                         icon: Icon(
                           _showSharedSecret
@@ -190,8 +194,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         tooltip:
                             _showSharedSecret
-                                ? 'Hide shared secret'
-                                : 'Show shared secret',
+                                ? 'Hide shared key'
+                                : 'Show shared key',
                         onPressed: () {
                           setState(() {
                             _showSharedSecret = !_showSharedSecret;
@@ -205,10 +209,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   TextField(
                     controller: _baseUrlController,
                     decoration: const InputDecoration(
-                      labelText: 'Local base URL',
-                      hintText: 'http://192.168.4.1',
+                      labelText: 'Home Wi-Fi base URL',
+                      hintText: 'http://192.168.1.192',
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Text('Hotspot fallback URL: $_hotspotBaseUrl'),
                   const SizedBox(height: 18),
                   ElevatedButton(
                     onPressed: _saving ? null : _save,

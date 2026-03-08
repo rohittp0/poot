@@ -59,8 +59,7 @@ class UnlockOrchestrator {
       return cancelledResult;
     }
 
-    final LocalUnlockResult local =
-        await _localUnlockService.unlockViaAccessPoint();
+    final LocalUnlockResult local = await _localUnlockService.unlockLocally();
 
     if (cancelled()) {
       return cancelledResult;
@@ -70,7 +69,7 @@ class UnlockOrchestrator {
       return const UnlockResult(
         success: true,
         path: UnlockPath.local,
-        message: 'Unlocked through local hotspot fallback.',
+        message: 'Unlocked through local network fallback.',
       );
     }
 

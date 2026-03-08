@@ -15,7 +15,7 @@ Poot is a Firebase-backed smart lock project with:
   - Arduino sketch for NodeMCU 1.0 (ESP-12E)
   - AP+STA mode
   - Firebase command polling + heartbeat + audit writes
-  - Local unlock API with shared-secret HMAC validation
+  - Local unlock API with simple shared-key validation
 - `firebase/database.rules.json`
   - Realtime Database rules template
 
@@ -30,14 +30,17 @@ Poot is a Firebase-backed smart lock project with:
 
 ## Local unlock API
 
+`POST http://192.168.1.192/api/local-unlock`
+
+The always-on fallback hotspot serves the same endpoint at:
+
 `POST http://192.168.4.1/api/local-unlock`
 
 Body:
 
 ```json
 {
-  "ts": 1739401200,
-  "sig": "hex_hmac_sha256(sharedSecret, ts)"
+  "key": "shared_local_key"
 }
 ```
 
@@ -101,7 +104,7 @@ flutter run
    - try to detect Realtime Database URL via Firebase CLI
    - generate `nodemcu/poot_lock/secrets.h`
    - generate Flutter local fallback defaults in `app/lib/src/config/local_fallback_defaults.dart`
-   - auto-generate and print fallback AP password + shared HMAC secret
+   - auto-generate and print fallback AP password + shared local key
    - auto-generate Firebase device password and optionally create device user in Firebase Auth
 
 ```bash
@@ -124,7 +127,7 @@ flutter run
 
 ## Notes
 
-- Local fallback auth is intentionally secret-based only: anyone with the shared secret can unlock locally.
+- Local fallback auth is intentionally key-based only: anyone with the shared key can unlock locally.
 - No local cached allowlist and no UID in local payload.
-- Keep `shared_hmac_secret` rotated periodically.
+- The app tries the fixed LAN IP first and then falls back to the ESP hotspot.
 - If cloud logs show repeated `401 unauthorized`, verify `/locks/{lockId}/deviceAccount` matches the firmware device user email + UID.

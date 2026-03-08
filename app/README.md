@@ -8,9 +8,9 @@ Flutter mobile app for Poot lock control.
 - Session restore on launch
 - Biometric authorization on app open
 - Cloud-first unlock command flow with Firebase Realtime Database
-- Automatic fallback to ESP8266 hotspot local unlock
+- LAN-first local unlock with automatic ESP8266 hotspot fallback
 - Admin cloud user access management
-- Local fallback settings (SSID, password, shared secret)
+- Local fallback settings (SSID, password, shared key)
 
 ## Environment and setup
 
@@ -30,7 +30,7 @@ flutter run
 ```
 
 3. (Recommended) run the root initializer once to auto-fill local fallback defaults
-   used by the app (`SSID`, `AP password`, shared HMAC secret):
+   used by the app (`SSID`, `AP password`, shared key, fixed LAN URL):
 
 ```bash
 cd /Users/rohittp/Data/Other/poot
@@ -45,7 +45,6 @@ and release builds with that key.
 ## Local fallback auth model
 
 Local fallback payload contains only:
-- `ts`
-- `sig = HMAC_SHA256(sharedSecret, ts)`
+- `key`
 
 No UID is sent in local requests.
