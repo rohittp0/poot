@@ -28,6 +28,26 @@ class UnlockOrchestrator {
       return cancelledResult;
     }
 
+    final bool preferDirectLan =
+        await _localUnlockService.canReachDirectLanUnlock();
+
+    if (preferDirectLan) {
+      final LocalUnlockResult localLan =
+          await _localUnlockService.unlockViaLan();
+
+      if (cancelled()) {
+        return cancelledResult;
+      }
+
+      if (localLan.success) {
+        return const UnlockResult(
+          success: true,
+          path: UnlockPath.local,
+          message: 'Unlocked directly over local Wi-Fi.',
+        );
+      }
+    }
+
     try {
       final CloudUnlockResult cloudResult = await _cloudUnlockService
           .unlockAndAwaitAck(
@@ -59,7 +79,10 @@ class UnlockOrchestrator {
       return cancelledResult;
     }
 
-    final LocalUnlockResult local = await _localUnlockService.unlockLocally();
+    final LocalUnlockResult local =
+        preferDirectLan
+            ? await _localUnlockService.unlockViaHotspot()
+            : await _localUnlockService.unlockLocally();
 
     if (cancelled()) {
       return cancelledResult;

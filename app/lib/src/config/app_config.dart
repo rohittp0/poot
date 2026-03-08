@@ -24,6 +24,7 @@ class AppConfig {
 
   static const Duration cloudAckTimeout = Duration(seconds: 6);
   static const Duration localRequestTimeout = Duration(seconds: 6);
+  static const Duration localProbeTimeout = Duration(milliseconds: 800);
 
   static const int commandTtlSeconds = 20;
   static const int deviceHeartbeatSeconds = 30;

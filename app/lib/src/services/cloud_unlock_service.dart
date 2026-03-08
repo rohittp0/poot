@@ -21,10 +21,11 @@ class CloudUnlockResult {
 }
 
 class CloudUnlockService {
-  CloudUnlockService({FirebaseDatabase? database})
-    : _database = database ?? FirebaseDatabase.instance;
+  CloudUnlockService({FirebaseDatabase? database}) : _database = database;
 
-  final FirebaseDatabase _database;
+  final FirebaseDatabase? _database;
+
+  FirebaseDatabase get database => _database ?? FirebaseDatabase.instance;
 
   Future<CloudUnlockResult> unlockAndAwaitAck({
     required String lockId,
@@ -42,10 +43,10 @@ class CloudUnlockService {
       );
     }
 
-    final DatabaseReference commandsRef = _database.ref(
+    final DatabaseReference commandsRef = database.ref(
       'locks/$lockId/commands',
     );
-    final DatabaseReference auditRef = _database.ref('locks/$lockId/audit');
+    final DatabaseReference auditRef = database.ref('locks/$lockId/audit');
 
     final String commandId =
         commandsRef.push().key ??

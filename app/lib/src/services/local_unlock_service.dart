@@ -30,9 +30,39 @@ class LocalUnlockService {
   final Connectivity _connectivity;
   final http.Client _httpClient;
 
+  Future<bool> canReachDirectLanUnlock() async {
+    final LocalUnlockSettings? settings = await _readConfiguredSettings();
+    if (settings == null) {
+      return false;
+    }
+
+    final List<ConnectivityResult> status =
+        await _connectivity.checkConnectivity();
+    if (!status.contains(ConnectivityResult.wifi)) {
+      return false;
+    }
+
+    return _isReachable(Uri.parse('${settings.baseUrl}/'));
+  }
+
+  Future<LocalUnlockResult> unlockViaLan() async {
+    final LocalUnlockSettings? settings = await _readConfiguredSettings();
+    if (settings == null) {
+      return const LocalUnlockResult(
+        success: false,
+        reason: 'local_settings_not_configured',
+      );
+    }
+
+    return _postLocalUnlock(
+      uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
+      sharedKey: settings.sharedKey,
+    );
+  }
+
   Future<LocalUnlockResult> unlockLocally() async {
-    final LocalUnlockSettings settings = await _settingsService.readSettings();
-    if (!settings.isConfigured) {
+    final LocalUnlockSettings? settings = await _readConfiguredSettings();
+    if (settings == null) {
       return const LocalUnlockResult(
         success: false,
         reason: 'local_settings_not_configured',
@@ -45,6 +75,29 @@ class LocalUnlockService {
     );
     if (lanAttempt.success || !_isTransportFailure(lanAttempt.reason)) {
       return lanAttempt;
+    }
+
+    await _bestEffortConnect(settings);
+
+    try {
+      return await _postLocalUnlock(
+        uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
+        sharedKey: settings.sharedKey,
+      );
+    } finally {
+      if (Platform.isAndroid) {
+        await WiFiForIoTPlugin.forceWifiUsage(false);
+      }
+    }
+  }
+
+  Future<LocalUnlockResult> unlockViaHotspot() async {
+    final LocalUnlockSettings? settings = await _readConfiguredSettings();
+    if (settings == null) {
+      return const LocalUnlockResult(
+        success: false,
+        reason: 'local_settings_not_configured',
+      );
     }
 
     await _bestEffortConnect(settings);
@@ -103,6 +156,28 @@ class LocalUnlockService {
 
   bool _isTransportFailure(String reason) {
     return reason == 'local_timeout' || reason == 'local_request_failed';
+  }
+
+  Future<LocalUnlockSettings?> _readConfiguredSettings() async {
+    final LocalUnlockSettings settings = await _settingsService.readSettings();
+    if (!settings.isConfigured) {
+      return null;
+    }
+    return settings;
+  }
+
+  Future<bool> _isReachable(Uri uri) async {
+    try {
+      final http.Response response = await _httpClient
+          .get(uri)
+          .timeout(AppConfig.localProbeTimeout);
+      return response.statusCode == 200 &&
+          response.body.trim() == 'Poot lock online';
+    } on TimeoutException {
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _bestEffortConnect(LocalUnlockSettings settings) async {
