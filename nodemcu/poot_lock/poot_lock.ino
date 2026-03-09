@@ -284,33 +284,22 @@ void ensureHttpServer(bool forceRestart = false) {
       server.send(200, "text/plain", "Poot lock online");
     });
 
-    server.on("/api/local-unlock", HTTP_POST, []() {
+    server.on("/api/local-unlock", HTTP_GET, []() {
       StaticJsonDocument<256> response;
       const String remoteIp = server.client().remoteIP().toString();
-      poot_diag::logf("LOCAL_HTTP", "POST /api/local-unlock from %s",
+      poot_diag::logf("LOCAL_HTTP", "GET /api/local-unlock from %s",
                       remoteIp.c_str());
 
-      if (!server.hasArg("plain")) {
-        poot_diag::logf("LOCAL_HTTP", "bad_request: missing body");
+      if (!server.hasArg("key")) {
+        poot_diag::logf("LOCAL_HTTP", "bad_request: missing key");
         response["ok"] = false;
         response["code"] = "bad_request";
-        response["message"] = "Missing JSON body";
+        response["message"] = "Missing key query parameter";
         sendJson(400, response);
         return;
       }
 
-      StaticJsonDocument<160> requestDoc;
-      const auto err = deserializeJson(requestDoc, server.arg("plain"));
-      if (err) {
-        poot_diag::logf("LOCAL_HTTP", "bad_json: parse failed");
-        response["ok"] = false;
-        response["code"] = "bad_json";
-        response["message"] = "Could not parse JSON";
-        sendJson(400, response);
-        return;
-      }
-
-      const String key = requestDoc["key"] | "";
+      const String key = server.arg("key");
       poot_diag::logf("LOCAL_HTTP", "request keyLen=%u", key.length());
 
       if (key.isEmpty() || key != LOCAL_SHARED_KEY) {

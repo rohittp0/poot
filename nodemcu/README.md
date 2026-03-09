@@ -63,16 +63,12 @@ Set:
 ## Local unlock contract
 
 Endpoints:
-- `POST http://192.168.1.192/api/local-unlock`
-- `POST http://192.168.4.1/api/local-unlock`
+- `GET http://192.168.1.192/api/local-unlock?key=shared_local_key`
+- `GET http://192.168.4.1/api/local-unlock?key=shared_local_key`
 
-JSON body:
+Query parameter:
 
-```json
-{
-  "key": "shared_local_key"
-}
-```
+- `key=shared_local_key`
 
 Validation:
 - direct shared-key match

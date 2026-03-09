@@ -31,100 +31,124 @@ class LocalUnlockService {
   final http.Client _httpClient;
 
   Future<bool> canReachDirectLanUnlock() async {
-    final LocalUnlockSettings? settings = await _readConfiguredSettings();
-    if (settings == null) {
+    try {
+      final LocalUnlockSettings? settings = await _readConfiguredSettings();
+      if (settings == null) {
+        return false;
+      }
+
+      final List<ConnectivityResult> status =
+          await _connectivity.checkConnectivity();
+      if (!status.contains(ConnectivityResult.wifi)) {
+        return false;
+      }
+
+      return _isReachable(Uri.parse('${settings.baseUrl}/'));
+    } catch (_) {
       return false;
     }
-
-    final List<ConnectivityResult> status =
-        await _connectivity.checkConnectivity();
-    if (!status.contains(ConnectivityResult.wifi)) {
-      return false;
-    }
-
-    return _isReachable(Uri.parse('${settings.baseUrl}/'));
   }
 
   Future<LocalUnlockResult> unlockViaLan() async {
-    final LocalUnlockSettings? settings = await _readConfiguredSettings();
-    if (settings == null) {
+    try {
+      final LocalUnlockSettings? settings = await _readConfiguredSettings();
+      if (settings == null) {
+        return const LocalUnlockResult(
+          success: false,
+          reason: 'local_settings_not_configured',
+        );
+      }
+
+      return _requestLocalUnlock(
+        uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
+        sharedKey: settings.sharedKey,
+      );
+    } catch (_) {
       return const LocalUnlockResult(
         success: false,
-        reason: 'local_settings_not_configured',
+        reason: 'local_request_failed',
       );
     }
-
-    return _postLocalUnlock(
-      uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
-      sharedKey: settings.sharedKey,
-    );
   }
 
   Future<LocalUnlockResult> unlockLocally() async {
-    final LocalUnlockSettings? settings = await _readConfiguredSettings();
-    if (settings == null) {
-      return const LocalUnlockResult(
-        success: false,
-        reason: 'local_settings_not_configured',
-      );
-    }
-
-    final LocalUnlockResult lanAttempt = await _postLocalUnlock(
-      uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
-      sharedKey: settings.sharedKey,
-    );
-    if (lanAttempt.success || !_isTransportFailure(lanAttempt.reason)) {
-      return lanAttempt;
-    }
-
-    await _bestEffortConnect(settings);
-
     try {
-      return await _postLocalUnlock(
-        uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
+      final LocalUnlockSettings? settings = await _readConfiguredSettings();
+      if (settings == null) {
+        return const LocalUnlockResult(
+          success: false,
+          reason: 'local_settings_not_configured',
+        );
+      }
+
+      final LocalUnlockResult lanAttempt = await _requestLocalUnlock(
+        uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
         sharedKey: settings.sharedKey,
       );
-    } finally {
-      if (Platform.isAndroid) {
-        await WiFiForIoTPlugin.forceWifiUsage(false);
+      if (lanAttempt.success || !_isTransportFailure(lanAttempt.reason)) {
+        return lanAttempt;
       }
+
+      await _bestEffortConnect(settings);
+
+      try {
+        return await _requestLocalUnlock(
+          uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
+          sharedKey: settings.sharedKey,
+        );
+      } finally {
+        if (Platform.isAndroid) {
+          await WiFiForIoTPlugin.forceWifiUsage(false);
+        }
+      }
+    } catch (_) {
+      return const LocalUnlockResult(
+        success: false,
+        reason: 'local_request_failed',
+      );
     }
   }
 
   Future<LocalUnlockResult> unlockViaHotspot() async {
-    final LocalUnlockSettings? settings = await _readConfiguredSettings();
-    if (settings == null) {
+    try {
+      final LocalUnlockSettings? settings = await _readConfiguredSettings();
+      if (settings == null) {
+        return const LocalUnlockResult(
+          success: false,
+          reason: 'local_settings_not_configured',
+        );
+      }
+
+      await _bestEffortConnect(settings);
+
+      try {
+        return await _requestLocalUnlock(
+          uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
+          sharedKey: settings.sharedKey,
+        );
+      } finally {
+        if (Platform.isAndroid) {
+          await WiFiForIoTPlugin.forceWifiUsage(false);
+        }
+      }
+    } catch (_) {
       return const LocalUnlockResult(
         success: false,
-        reason: 'local_settings_not_configured',
+        reason: 'local_request_failed',
       );
-    }
-
-    await _bestEffortConnect(settings);
-
-    try {
-      return await _postLocalUnlock(
-        uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
-        sharedKey: settings.sharedKey,
-      );
-    } finally {
-      if (Platform.isAndroid) {
-        await WiFiForIoTPlugin.forceWifiUsage(false);
-      }
     }
   }
 
-  Future<LocalUnlockResult> _postLocalUnlock({
+  Future<LocalUnlockResult> _requestLocalUnlock({
     required Uri uri,
     required String sharedKey,
   }) async {
     try {
+      final Uri requestUri = uri.replace(
+        queryParameters: <String, String>{'key': sharedKey},
+      );
       final http.Response response = await _httpClient
-          .post(
-            uri,
-            headers: const <String, String>{'Content-Type': 'application/json'},
-            body: jsonEncode(<String, Object>{'key': sharedKey}),
-          )
+          .get(requestUri)
           .timeout(AppConfig.localRequestTimeout);
 
       if (response.statusCode >= 200 && response.statusCode < 300) {

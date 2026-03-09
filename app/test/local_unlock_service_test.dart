@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -31,7 +29,8 @@ void main() {
       settingsService: FakeSettingsService(settings),
       httpClient: MockClient((http.Request request) async {
         requests.add(request.url);
-        expect(jsonDecode(request.body), <String, dynamic>{
+        expect(request.method, 'GET');
+        expect(request.url.queryParameters, <String, String>{
           'key': settings.sharedKey,
         });
         return http.Response('{"ok":true,"code":"ok"}', 200);
@@ -41,7 +40,9 @@ void main() {
     final LocalUnlockResult result = await service.unlockLocally();
 
     expect(result.success, isTrue);
-    expect(requests, <Uri>[Uri.parse('http://192.168.1.192/api/local-unlock')]);
+    expect(requests, <Uri>[
+      Uri.parse('http://192.168.1.192/api/local-unlock?key=shared-key'),
+    ]);
   });
 
   test('falls back to hotspot after LAN transport failure', () async {
@@ -61,8 +62,8 @@ void main() {
 
     expect(result.success, isTrue);
     expect(requests, <Uri>[
-      Uri.parse('http://192.168.1.192/api/local-unlock'),
-      Uri.parse('http://192.168.4.1/api/local-unlock'),
+      Uri.parse('http://192.168.1.192/api/local-unlock?key=shared-key'),
+      Uri.parse('http://192.168.4.1/api/local-unlock?key=shared-key'),
     ]);
   });
 
@@ -80,6 +81,8 @@ void main() {
 
     expect(result.success, isFalse);
     expect(result.reason, 'invalid_key');
-    expect(requests, <Uri>[Uri.parse('http://192.168.1.192/api/local-unlock')]);
+    expect(requests, <Uri>[
+      Uri.parse('http://192.168.1.192/api/local-unlock?key=shared-key'),
+    ]);
   });
 }

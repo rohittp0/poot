@@ -193,10 +193,20 @@ class _HomeScreenState extends State<HomeScreen> {
       _statusSuccess = true;
     });
 
-    final UnlockResult result = await widget.services.unlockOrchestrator.unlock(
-      requestedByUid: widget.user.uid,
-      isCancelled: () => attemptId != _unlockAttemptId,
-    );
+    late final UnlockResult result;
+    try {
+      result = await widget.services.unlockOrchestrator.unlock(
+        requestedByUid: widget.user.uid,
+        isCancelled: () => attemptId != _unlockAttemptId,
+      );
+    } catch (error) {
+      debugPrint('Unlock flow failed unexpectedly: $error');
+      result = const UnlockResult(
+        success: false,
+        path: UnlockPath.none,
+        message: 'Unlock failed unexpectedly. Please try again.',
+      );
+    }
 
     if (!mounted || attemptId != _unlockAttemptId) {
       return;
@@ -232,24 +242,33 @@ class _HomeScreenState extends State<HomeScreen> {
       _statusSuccess = true;
     });
 
-    final local = await widget.services.localUnlockService.unlockLocally();
+    late final UnlockResult result;
+    try {
+      final local = await widget.services.localUnlockService.unlockLocally();
+      result =
+          local.success
+              ? const UnlockResult(
+                success: true,
+                path: UnlockPath.local,
+                message: 'Unlocked through local network fallback.',
+              )
+              : UnlockResult(
+                success: false,
+                path: UnlockPath.none,
+                message: 'Local unlock failed: ${local.reason}',
+              );
+    } catch (error) {
+      debugPrint('Local unlock flow failed unexpectedly: $error');
+      result = const UnlockResult(
+        success: false,
+        path: UnlockPath.none,
+        message: 'Local unlock failed unexpectedly. Please try again.',
+      );
+    }
 
     if (!mounted || attemptId != _unlockAttemptId) {
       return;
     }
-
-    final UnlockResult result =
-        local.success
-            ? const UnlockResult(
-              success: true,
-              path: UnlockPath.local,
-              message: 'Unlocked through local network fallback.',
-            )
-            : UnlockResult(
-              success: false,
-              path: UnlockPath.none,
-              message: 'Local unlock failed: ${local.reason}',
-            );
 
     setState(() {
       _busy = false;

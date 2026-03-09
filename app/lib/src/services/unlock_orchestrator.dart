@@ -28,12 +28,27 @@ class UnlockOrchestrator {
       return cancelledResult;
     }
 
-    final bool preferDirectLan =
-        await _localUnlockService.canReachDirectLanUnlock();
+    bool preferDirectLan = false;
+    try {
+      preferDirectLan = await _localUnlockService.canReachDirectLanUnlock();
+    } catch (_) {
+      preferDirectLan = false;
+    }
 
     if (preferDirectLan) {
-      final LocalUnlockResult localLan =
-          await _localUnlockService.unlockViaLan();
+      final LocalUnlockResult localLan;
+      try {
+        localLan = await _localUnlockService.unlockViaLan();
+      } catch (_) {
+        preferDirectLan = false;
+        return _runCloudThenLocalFallback(
+          requestedByUid: requestedByUid,
+          preferDirectLan: preferDirectLan,
+          cancelled: cancelled,
+          cancelledResult: cancelledResult,
+          isCancelled: isCancelled,
+        );
+      }
 
       if (cancelled()) {
         return cancelledResult;
@@ -48,6 +63,22 @@ class UnlockOrchestrator {
       }
     }
 
+    return _runCloudThenLocalFallback(
+      requestedByUid: requestedByUid,
+      preferDirectLan: preferDirectLan,
+      cancelled: cancelled,
+      cancelledResult: cancelledResult,
+      isCancelled: isCancelled,
+    );
+  }
+
+  Future<UnlockResult> _runCloudThenLocalFallback({
+    required String requestedByUid,
+    required bool preferDirectLan,
+    required bool Function() cancelled,
+    required UnlockResult cancelledResult,
+    required bool Function()? isCancelled,
+  }) async {
     try {
       final CloudUnlockResult cloudResult = await _cloudUnlockService
           .unlockAndAwaitAck(
@@ -79,10 +110,19 @@ class UnlockOrchestrator {
       return cancelledResult;
     }
 
-    final LocalUnlockResult local =
-        preferDirectLan
-            ? await _localUnlockService.unlockViaHotspot()
-            : await _localUnlockService.unlockLocally();
+    final LocalUnlockResult local;
+    try {
+      local =
+          preferDirectLan
+              ? await _localUnlockService.unlockViaHotspot()
+              : await _localUnlockService.unlockLocally();
+    } catch (_) {
+      return const UnlockResult(
+        success: false,
+        path: UnlockPath.none,
+        message: 'Unlock failed: local_request_failed',
+      );
+    }
 
     if (cancelled()) {
       return cancelledResult;

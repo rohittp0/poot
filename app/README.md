@@ -47,4 +47,5 @@ and release builds with that key.
 Local fallback payload contains only:
 - `key`
 
+The app sends it as a query parameter on `GET /api/local-unlock`.
 No UID is sent in local requests.

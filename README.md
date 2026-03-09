@@ -30,19 +30,15 @@ Poot is a Firebase-backed smart lock project with:
 
 ## Local unlock API
 
-`POST http://192.168.1.192/api/local-unlock`
+`GET http://192.168.1.192/api/local-unlock?key=shared_local_key`
 
 The always-on fallback hotspot serves the same endpoint at:
 
-`POST http://192.168.4.1/api/local-unlock`
+`GET http://192.168.4.1/api/local-unlock?key=shared_local_key`
 
-Body:
+Query parameter:
 
-```json
-{
-  "key": "shared_local_key"
-}
-```
+- `key=shared_local_key`
 
 ## Setup
 

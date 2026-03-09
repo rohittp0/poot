@@ -5,28 +5,50 @@ import '../services/app_services.dart';
 import 'home_screen.dart';
 import 'sign_in_screen.dart';
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key, required this.services});
 
   final AppServices services;
 
   @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  late final Future<void> _restoreFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreFuture = widget.services.authService.restoreSessionIfPossible();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: services.authService.authStateChanges(),
-      builder: (BuildContext context, AsyncSnapshot<User?> snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+    return FutureBuilder<void>(
+      future: _restoreFuture,
+      builder: (BuildContext context, AsyncSnapshot<void> restoreSnapshot) {
+        return StreamBuilder<User?>(
+          stream: widget.services.authService.authStateChanges(),
+          initialData: widget.services.authService.currentUser,
+          builder: (BuildContext context, AsyncSnapshot<User?> snapshot) {
+            final User? user =
+                snapshot.data ?? widget.services.authService.currentUser;
+            if (user != null) {
+              return HomeScreen(services: widget.services, user: user);
+            }
 
-        final User? user = snapshot.data;
-        if (user == null) {
-          return SignInScreen(authService: services.authService);
-        }
+            final bool restoreInProgress =
+                restoreSnapshot.connectionState != ConnectionState.done;
+            if (restoreInProgress) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
 
-        return HomeScreen(services: services, user: user);
+            return SignInScreen(authService: widget.services.authService);
+          },
+        );
       },
     );
   }

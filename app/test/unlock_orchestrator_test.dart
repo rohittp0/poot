@@ -13,12 +13,20 @@ class FakeLocalUnlockService extends LocalUnlockService {
     required this.lanResult,
     required this.localResult,
     required this.hotspotResult,
+    this.canReachLanError,
+    this.lanError,
+    this.localError,
+    this.hotspotError,
   }) : super(settingsService: FakeSettingsService());
 
   final bool canReachLan;
   final LocalUnlockResult lanResult;
   final LocalUnlockResult localResult;
   final LocalUnlockResult hotspotResult;
+  final Object? canReachLanError;
+  final Object? lanError;
+  final Object? localError;
+  final Object? hotspotError;
 
   int canReachLanCalls = 0;
   int unlockViaLanCalls = 0;
@@ -28,24 +36,36 @@ class FakeLocalUnlockService extends LocalUnlockService {
   @override
   Future<bool> canReachDirectLanUnlock() async {
     canReachLanCalls++;
+    if (canReachLanError != null) {
+      throw canReachLanError!;
+    }
     return canReachLan;
   }
 
   @override
   Future<LocalUnlockResult> unlockViaLan() async {
     unlockViaLanCalls++;
+    if (lanError != null) {
+      throw lanError!;
+    }
     return lanResult;
   }
 
   @override
   Future<LocalUnlockResult> unlockLocally() async {
     unlockLocallyCalls++;
+    if (localError != null) {
+      throw localError!;
+    }
     return localResult;
   }
 
   @override
   Future<LocalUnlockResult> unlockViaHotspot() async {
     unlockViaHotspotCalls++;
+    if (hotspotError != null) {
+      throw hotspotError!;
+    }
     return hotspotResult;
   }
 }
@@ -173,4 +193,69 @@ void main() {
       expect(local.unlockLocallyCalls, 0);
     },
   );
+
+  test('continues to cloud when LAN reachability probe throws', () async {
+    final FakeLocalUnlockService local = FakeLocalUnlockService(
+      canReachLan: false,
+      lanResult: const LocalUnlockResult(success: false, reason: 'unused'),
+      localResult: const LocalUnlockResult(success: false, reason: 'unused'),
+      hotspotResult: const LocalUnlockResult(success: false, reason: 'unused'),
+      canReachLanError: StateError('probe failed'),
+    );
+    final FakeCloudUnlockService cloud = FakeCloudUnlockService(
+      const CloudUnlockResult(
+        success: true,
+        commandId: 'cmd-1',
+        reason: 'ok',
+        timedOut: false,
+        canceled: false,
+      ),
+    );
+    final UnlockOrchestrator orchestrator = UnlockOrchestrator(
+      cloudUnlockService: cloud,
+      localUnlockService: local,
+    );
+
+    final UnlockResult result = await orchestrator.unlock(
+      requestedByUid: 'user-1',
+    );
+
+    expect(result.success, isTrue);
+    expect(result.path, UnlockPath.cloud);
+    expect(local.canReachLanCalls, 1);
+    expect(local.unlockViaLanCalls, 0);
+    expect(cloud.calls, 1);
+  });
+
+  test('returns a failure result when local fallback throws', () async {
+    final FakeLocalUnlockService local = FakeLocalUnlockService(
+      canReachLan: false,
+      lanResult: const LocalUnlockResult(success: false, reason: 'unused'),
+      localResult: const LocalUnlockResult(success: false, reason: 'unused'),
+      hotspotResult: const LocalUnlockResult(success: false, reason: 'unused'),
+      localError: StateError('wifi plugin failed'),
+    );
+    final FakeCloudUnlockService cloud = FakeCloudUnlockService(
+      const CloudUnlockResult(
+        success: false,
+        commandId: 'cmd-1',
+        reason: 'cloud_ack_timeout',
+        timedOut: true,
+        canceled: false,
+      ),
+    );
+    final UnlockOrchestrator orchestrator = UnlockOrchestrator(
+      cloudUnlockService: cloud,
+      localUnlockService: local,
+    );
+
+    final UnlockResult result = await orchestrator.unlock(
+      requestedByUid: 'user-1',
+    );
+
+    expect(result.success, isFalse);
+    expect(result.message, 'Unlock failed: local_request_failed');
+    expect(cloud.calls, 1);
+    expect(local.unlockLocallyCalls, 1);
+  });
 }
