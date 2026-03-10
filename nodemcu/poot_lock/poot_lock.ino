@@ -30,6 +30,10 @@ uint32_t lastHeartbeatMs = 0;
 uint32_t lastWiFiReconnectMs = 0;
 uint32_t lastNetworkEnsureMs = 0;
 uint32_t lastWiFiBeginMs = 0;
+uint32_t lastApStartMs = 0;
+uint32_t lastHttpServerStartMs = 0;
+uint32_t lastLocalHttpActivityMs = 0;
+uint32_t lastLocalPriorityLogMs = 0;
 uint32_t wifiConnectedSinceMs = 0;
 uint32_t lastCloudHoldoffLogMs = 0;
 uint32_t cloudStartDelayMs = poot::kCloudStartDelayAfterWiFiMs;
@@ -137,6 +141,37 @@ void logCloudHoldoff(const char* scope) {
   const uint32_t elapsed = (wifiConnectedSinceMs == 0) ? 0 : (nowMs - wifiConnectedSinceMs);
   poot_diag::logf(scope, "cloud holdoff: waiting %lu/%lu ms after wifi connect",
                   elapsed, cloudStartDelayMs);
+}
+
+void markLocalHttpActivity() { lastLocalHttpActivityMs = millis(); }
+
+uint8_t softApClientCount() {
+  return static_cast<uint8_t>(WiFi.softAPgetStationNum());
+}
+
+bool hasRecentLocalHttpActivity() {
+  return lastLocalHttpActivityMs != 0 &&
+         millis() - lastLocalHttpActivityMs <= poot::kLocalPriorityHoldMs;
+}
+
+bool localPriorityActive() {
+  return softApClientCount() > 0 || hasRecentLocalHttpActivity();
+}
+
+void logLocalPriorityHoldoff(const char* scope) {
+  const uint32_t nowMs = millis();
+  if (nowMs - lastLocalPriorityLogMs < 4000) {
+    return;
+  }
+  lastLocalPriorityLogMs = nowMs;
+
+  poot_diag::logf(scope, "local priority active apClients=%u recentHttp=%u",
+                  softApClientCount(), hasRecentLocalHttpActivity() ? 1 : 0);
+}
+
+void pumpLocalServer() {
+  server.handleClient();
+  yield();
 }
 
 void writeStatusLed(bool on) {
@@ -280,11 +315,13 @@ void sendJson(int code, const TDoc& doc) {
 void ensureHttpServer(bool forceRestart = false) {
   if (!serverRoutesRegistered) {
     server.on("/", HTTP_GET, []() {
+      markLocalHttpActivity();
       poot_diag::logf("HTTP", "GET /");
       server.send(200, "text/plain", "Poot lock online");
     });
 
     server.on("/api/local-unlock", HTTP_GET, []() {
+      markLocalHttpActivity();
       StaticJsonDocument<256> response;
       const String remoteIp = server.client().remoteIP().toString();
       poot_diag::logf("LOCAL_HTTP", "GET /api/local-unlock from %s",
@@ -339,16 +376,32 @@ void ensureHttpServer(bool forceRestart = false) {
     serverRoutesRegistered = true;
   }
 
-  if (!serverStarted || forceRestart) {
+  const uint32_t nowMs = millis();
+  const bool periodicRestart =
+      serverStarted &&
+      (nowMs - lastHttpServerStartMs >= poot::kHttpServerReassertMs) &&
+      !localPriorityActive();
+  if (!serverStarted || forceRestart || periodicRestart) {
+    const bool wasStarted = serverStarted;
+    if (serverStarted) {
+      server.stop();
+      yield();
+    }
     server.begin();
     serverStarted = true;
-    poot_diag::logf("HTTP", "server started on port=%u",
+    lastHttpServerStartMs = nowMs;
+    poot_diag::logf("HTTP", "server %s on port=%u",
+                    wasStarted ? "ensured" : "started",
                     poot::kLocalHttpPort);
   }
 }
 
 bool ensureAccessPoint(bool forceRestart = false) {
+  const uint32_t nowMs = millis();
   bool shouldRestart = forceRestart;
+  const bool periodicRestart =
+      lastApStartMs != 0 && (nowMs - lastApStartMs >= poot::kApReassertMs) &&
+      !localPriorityActive();
 
   if (WiFi.getMode() != WIFI_AP_STA) {
     WiFi.mode(WIFI_AP_STA);
@@ -360,14 +413,32 @@ bool ensureAccessPoint(bool forceRestart = false) {
     shouldRestart = true;
   }
 
+  if (lastApStartMs == 0) {
+    shouldRestart = true;
+  }
+
+  if (periodicRestart) {
+    shouldRestart = true;
+  }
+
   if (!shouldRestart) {
     return false;
+  }
+
+  if (lastApStartMs != 0) {
+    WiFi.softAPdisconnect(false);
+    yield();
   }
 
   const bool apConfigured = WiFi.softAPConfig(kApIp, kApGateway, kApSubnet);
   const bool apStarted =
       WiFi.softAP(AP_SSID, AP_PASSWORD, poot::kApChannel, false,
                   poot::kApMaxConnections);
+  if (apStarted) {
+    lastApStartMs = nowMs;
+  } else {
+    lastApStartMs = 0;
+  }
   poot_diag::logf("WIFI",
                   "AP %s config=%s ssid=%s ip=%s channel=%u maxClients=%u",
                   apStarted ? "started" : "failed",
@@ -394,6 +465,11 @@ void setupWiFi() {
 }
 
 void pollCloudCommands() {
+  if (localPriorityActive()) {
+    logLocalPriorityHoldoff("CLOUD");
+    return;
+  }
+
   if (!isCloudReady()) {
     logCloudHoldoff("CLOUD");
     return;
@@ -473,6 +549,11 @@ void pollCloudCommands() {
 }
 
 void publishHeartbeat() {
+  if (localPriorityActive()) {
+    logLocalPriorityHoldoff("CLOUD");
+    return;
+  }
+
   if (!isCloudReady()) {
     logCloudHoldoff("CLOUD");
     return;
@@ -519,6 +600,11 @@ void ensureNetworkStack() {
     ensureHttpServer(true);
   } else if (!serverStarted) {
     ensureHttpServer();
+  }
+
+  if (localPriorityActive()) {
+    logLocalPriorityHoldoff("WIFI");
+    return;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -572,13 +658,16 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient();
+  pumpLocalServer();
   relay.loop();
 
   logWiFiStatusIfChanged();
   ensureNetworkStack();
+  pumpLocalServer();
   pollCloudCommands();
+  pumpLocalServer();
   publishHeartbeat();
+  pumpLocalServer();
   updateStatusLed();
   yield();
 }
