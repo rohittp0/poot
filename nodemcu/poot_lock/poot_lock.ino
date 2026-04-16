@@ -53,10 +53,38 @@ const char* wifiStatusName(wl_status_t status) {
     case WL_NO_SSID_AVAIL:   return "no_ssid";
     case WL_CONNECT_FAILED:  return "connect_failed";
     case WL_CONNECTION_LOST: return "connection_lost";
+    case WL_WRONG_PASSWORD:  return "wrong_password";
     case WL_DISCONNECTED:    return "disconnected";
     case WL_IDLE_STATUS:     return "idle";
     default:                 return "unknown";
   }
+}
+
+const char* encTypeName(uint8_t enc) {
+  switch (enc) {
+    case ENC_TYPE_NONE: return "open";
+    case ENC_TYPE_WEP:  return "wep";
+    case ENC_TYPE_TKIP: return "wpa";
+    case ENC_TYPE_CCMP: return "wpa2";
+    case ENC_TYPE_AUTO: return "auto";
+    default:            return "unknown";
+  }
+}
+
+void scanAndLogNetworks() {
+  poot_diag::logf("WIFI", "scanning for networks...");
+  const int count = WiFi.scanNetworks();
+  if (count <= 0) {
+    poot_diag::logf("WIFI", "scan found 0 networks (count=%d)", count);
+    return;
+  }
+  poot_diag::logf("WIFI", "scan found %d networks:", count);
+  for (int i = 0; i < count; i++) {
+    poot_diag::logf("WIFI", "  [%d] ssid=\"%s\" rssi=%d ch=%d enc=%s",
+                    i, WiFi.SSID(i).c_str(), WiFi.RSSI(i),
+                    WiFi.channel(i), encTypeName(WiFi.encryptionType(i)));
+  }
+  WiFi.scanDelete();
 }
 
 void logWiFiStatusIfChanged() {
@@ -177,6 +205,14 @@ void connectSta(bool forceReconnect = false) {
     return;
   }
 
+  // Unlock while connecting so the lock is never permanently inaccessible
+  // if WiFi is down. The relay cooldown prevents double-firing on rapid retries.
+  relay.triggerPulse(poot::kUnlockPulseMs, poot::kUnlockCooldownMs);
+
+  const wl_status_t prevStatus = WiFi.status();
+  poot_diag::logf("WIFI", "connectSta force=%u prevStatus=%s(%d)",
+                  forceReconnect ? 1 : 0, wifiStatusName(prevStatus), prevStatus);
+
   if (forceReconnect) {
     WiFi.disconnect(false);
     yield();
@@ -185,7 +221,8 @@ void connectSta(bool forceReconnect = false) {
   configureStaNetwork();
   lastWiFiBeginMs = millis();
   lastWiFiReconnectMs = lastWiFiBeginMs;
-  poot_diag::logf("WIFI", "STA connecting to ssid=%s", WIFI_STA_SSID);
+  poot_diag::logf("WIFI", "STA connecting to ssid=%s pwdLen=%u",
+                  WIFI_STA_SSID, (unsigned)strlen(WIFI_STA_PASSWORD));
   WiFi.begin(WIFI_STA_SSID, WIFI_STA_PASSWORD);
 }
 
@@ -272,6 +309,7 @@ void setupWiFi() {
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.mode(WIFI_STA);
   poot_diag::logf("WIFI", "mode STA");
+  scanAndLogNetworks();
   connectSta();
 }
 

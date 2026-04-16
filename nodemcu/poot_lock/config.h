@@ -19,9 +19,9 @@ static constexpr uint32_t kWiFiConnectingWindowMs = 8000;
 
 static constexpr uint32_t kUnlockPulseMs = 5000;
 static constexpr uint32_t kUnlockCooldownMs = 5000;
-static constexpr uint32_t kWiFiReconnectMs = 3000;
+static constexpr uint32_t kWiFiReconnectMs = 12000;
 static constexpr uint32_t kNetworkEnsureMs = 1000;
-static constexpr uint32_t kWiFiStatusLogIntervalMs = 30000;
+static constexpr uint32_t kWiFiStatusLogIntervalMs = 3000;
 static constexpr uint32_t kHttpServerReassertMs = 15000;
 
 static constexpr uint16_t kLocalHttpPort = 80;
