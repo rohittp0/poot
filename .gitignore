@@ -17,3 +17,4 @@ nodemcu/poot_lock/secrets.h
 app/android/key.properties
 app/android/poot-upload-keystore.jks
 app/android/poot-upload-keystore.jks.bak.*
+.gitnexus
