@@ -2,6 +2,14 @@
 
 #include "diagnostics.h"
 
+namespace {
+
+bool timeReached(uint32_t now, uint32_t target) {
+  return static_cast<int32_t>(now - target) >= 0;
+}
+
+}  // namespace
+
 RelayController::RelayController(uint8_t pin, bool activeLow)
     : pin_(pin), activeLow_(activeLow) {}
 
@@ -14,7 +22,7 @@ void RelayController::begin() {
 
 void RelayController::loop() {
   const uint32_t now = millis();
-  if (relayOn_ && now >= pulseEndMs_) {
+  if (relayOn_ && timeReached(now, pulseEndMs_)) {
     writeRelay(false);
     poot_diag::logf("RELAY", "pulse ended");
   }
@@ -22,16 +30,22 @@ void RelayController::loop() {
 
 bool RelayController::triggerPulse(uint32_t durationMs, uint32_t cooldownMs) {
   const uint32_t now = millis();
-  if (now < cooldownUntilMs_) {
-    poot_diag::logf("RELAY", "pulse denied: cooldown remaining=%lu ms",
-                    cooldownUntilMs_ - now);
-    return false;
+  if (relayOn_) {
+    pulseEndMs_ = now + durationMs;
+    cooldownUntilMs_ = pulseEndMs_ + cooldownMs;
+    poot_diag::logf("RELAY", "pulse refreshed duration=%lu ms cooldown=%lu ms",
+                    durationMs, cooldownMs);
+    return true;
   }
 
+  const bool restartingDuringCooldown =
+      cooldownUntilMs_ != 0 && !timeReached(now, cooldownUntilMs_);
   writeRelay(true);
   pulseEndMs_ = now + durationMs;
-  cooldownUntilMs_ = now + cooldownMs;
-  poot_diag::logf("RELAY", "pulse started duration=%lu ms cooldown=%lu ms",
+  cooldownUntilMs_ = pulseEndMs_ + cooldownMs;
+  poot_diag::logf("RELAY", "%s duration=%lu ms cooldown=%lu ms",
+                  restartingDuringCooldown ? "pulse restarted during cooldown"
+                                           : "pulse started",
                   durationMs, cooldownMs);
   return true;
 }
@@ -39,7 +53,7 @@ bool RelayController::triggerPulse(uint32_t durationMs, uint32_t cooldownMs) {
 bool RelayController::isRelayOn() const { return relayOn_; }
 
 bool RelayController::isCoolingDown() const {
-  return millis() < cooldownUntilMs_;
+  return cooldownUntilMs_ != 0 && !timeReached(millis(), cooldownUntilMs_);
 }
 
 void RelayController::writeRelay(bool on) {

@@ -2,21 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:poot/src/models/local_unlock_settings.dart';
 
 void main() {
-  test('local settings configuration check', () {
+  test('local settings isConfigured requires sharedKey and baseUrl', () {
     const LocalUnlockSettings empty = LocalUnlockSettings(
-      espSsid: '',
-      espPassword: '',
+      homeWifiSsid: '',
+      homeWifiPassword: '',
       sharedKey: '',
       baseUrl: 'http://192.168.1.192',
-      hotspotBaseUrl: 'http://192.168.4.1',
     );
 
     const LocalUnlockSettings ready = LocalUnlockSettings(
-      espSsid: 'Poot-Lock',
-      espPassword: 'password123',
+      homeWifiSsid: 'HomeWiFi',
+      homeWifiPassword: 'password123',
       sharedKey: 'supersecret',
       baseUrl: 'http://192.168.1.192',
-      hotspotBaseUrl: 'http://192.168.4.1',
     );
 
     expect(empty.isConfigured, isFalse);

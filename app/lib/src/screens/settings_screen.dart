@@ -13,12 +13,11 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final TextEditingController _baseUrlController = TextEditingController();
+  final TextEditingController _secretController = TextEditingController();
   final TextEditingController _ssidController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _secretController = TextEditingController();
-  final TextEditingController _baseUrlController = TextEditingController();
 
-  String _hotspotBaseUrl = '';
   bool _loading = true;
   bool _saving = false;
   bool _showPassword = false;
@@ -33,11 +32,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final LocalUnlockSettings settings =
         await widget.settingsService.readSettings();
-    _ssidController.text = settings.espSsid;
-    _passwordController.text = settings.espPassword;
-    _secretController.text = settings.sharedKey;
     _baseUrlController.text = settings.baseUrl;
-    _hotspotBaseUrl = settings.hotspotBaseUrl;
+    _secretController.text = settings.sharedKey;
+    _ssidController.text = settings.homeWifiSsid;
+    _passwordController.text = settings.homeWifiPassword;
     if (mounted) {
       setState(() {
         _loading = false;
@@ -51,11 +49,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     final LocalUnlockSettings settings = LocalUnlockSettings(
-      espSsid: _ssidController.text,
-      espPassword: _passwordController.text,
-      sharedKey: _secretController.text,
       baseUrl: _baseUrlController.text,
-      hotspotBaseUrl: _hotspotBaseUrl,
+      sharedKey: _secretController.text,
+      homeWifiSsid: _ssidController.text,
+      homeWifiPassword: _passwordController.text,
     );
 
     await widget.settingsService.saveSettings(settings);
@@ -68,9 +65,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _saving = false;
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Local fallback settings saved.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
   }
 
   Future<void> _resetToDefaults() async {
@@ -78,9 +75,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Reset local fallback?'),
+          title: const Text('Reset settings?'),
           content: const Text(
-            'This will replace current local settings with generated defaults.',
+            'This will replace current settings with generated defaults.',
           ),
           actions: <Widget>[
             TextButton(
@@ -112,36 +109,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     setState(() {
-      _ssidController.text = settings.espSsid;
-      _passwordController.text = settings.espPassword;
-      _secretController.text = settings.sharedKey;
       _baseUrlController.text = settings.baseUrl;
-      _hotspotBaseUrl = settings.hotspotBaseUrl;
+      _secretController.text = settings.sharedKey;
+      _ssidController.text = settings.homeWifiSsid;
+      _passwordController.text = settings.homeWifiPassword;
       _showPassword = false;
       _showSharedSecret = false;
       _saving = false;
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Local fallback settings reset to defaults.'),
-      ),
+      const SnackBar(content: Text('Settings reset to defaults.')),
     );
   }
 
   @override
   void dispose() {
+    _baseUrlController.dispose();
+    _secretController.dispose();
     _ssidController.dispose();
     _passwordController.dispose();
-    _secretController.dispose();
-    _baseUrlController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Poot settings')),
+      appBar: AppBar(title: const Text('Settings')),
       body:
           _loading
               ? const Center(child: CircularProgressIndicator())
@@ -149,37 +143,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 padding: const EdgeInsets.all(20),
                 children: <Widget>[
                   const Text(
-                    'Local fallback',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                    'Lock connection',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
-                    controller: _ssidController,
+                    controller: _baseUrlController,
                     decoration: const InputDecoration(
-                      labelText: 'ESP hotspot SSID',
+                      labelText: 'Lock base URL',
+                      hintText: 'http://192.168.1.192',
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _passwordController,
-                    decoration: InputDecoration(
-                      labelText: 'ESP hotspot password',
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _showPassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                        ),
-                        tooltip:
-                            _showPassword ? 'Hide password' : 'Show password',
-                        onPressed: () {
-                          setState(() {
-                            _showPassword = !_showPassword;
-                          });
-                        },
-                      ),
-                    ),
-                    obscureText: !_showPassword,
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -205,17 +181,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     obscureText: !_showSharedSecret,
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _baseUrlController,
-                    decoration: const InputDecoration(
-                      labelText: 'Home Wi-Fi base URL',
-                      hintText: 'http://192.168.1.192',
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Home Wi-Fi (optional)',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text('Hotspot fallback URL: $_hotspotBaseUrl'),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'If set, the app will connect to this network automatically before unlocking.',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _ssidController,
+                    decoration: const InputDecoration(
+                      labelText: 'Wi-Fi name (SSID)',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _passwordController,
+                    decoration: InputDecoration(
+                      labelText: 'Wi-Fi password',
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _showPassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                        ),
+                        tooltip:
+                            _showPassword ? 'Hide password' : 'Show password',
+                        onPressed: () {
+                          setState(() {
+                            _showPassword = !_showPassword;
+                          });
+                        },
+                      ),
+                    ),
+                    obscureText: !_showPassword,
+                  ),
+                  const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: _saving ? null : _save,
                     child: Text(_saving ? 'Saving...' : 'Save settings'),

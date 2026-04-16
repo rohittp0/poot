@@ -1,38 +1,29 @@
 class LocalUnlockSettings {
   const LocalUnlockSettings({
-    required this.espSsid,
-    required this.espPassword,
+    required this.homeWifiSsid,
+    required this.homeWifiPassword,
     required this.sharedKey,
     required this.baseUrl,
-    required this.hotspotBaseUrl,
   });
 
-  final String espSsid;
-  final String espPassword;
+  final String homeWifiSsid;
+  final String homeWifiPassword;
   final String sharedKey;
   final String baseUrl;
-  final String hotspotBaseUrl;
 
-  bool get isConfigured =>
-      espSsid.isNotEmpty &&
-      espPassword.isNotEmpty &&
-      sharedKey.isNotEmpty &&
-      baseUrl.isNotEmpty &&
-      hotspotBaseUrl.isNotEmpty;
+  bool get isConfigured => sharedKey.isNotEmpty && baseUrl.isNotEmpty;
 
   LocalUnlockSettings copyWith({
-    String? espSsid,
-    String? espPassword,
+    String? homeWifiSsid,
+    String? homeWifiPassword,
     String? sharedKey,
     String? baseUrl,
-    String? hotspotBaseUrl,
   }) {
     return LocalUnlockSettings(
-      espSsid: espSsid ?? this.espSsid,
-      espPassword: espPassword ?? this.espPassword,
+      homeWifiSsid: homeWifiSsid ?? this.homeWifiSsid,
+      homeWifiPassword: homeWifiPassword ?? this.homeWifiPassword,
       sharedKey: sharedKey ?? this.sharedKey,
       baseUrl: baseUrl ?? this.baseUrl,
-      hotspotBaseUrl: hotspotBaseUrl ?? this.hotspotBaseUrl,
     );
   }
 }

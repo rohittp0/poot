@@ -19,35 +19,13 @@ static constexpr uint32_t kWiFiConnectingWindowMs = 8000;
 
 static constexpr uint32_t kUnlockPulseMs = 5000;
 static constexpr uint32_t kUnlockCooldownMs = 5000;
-static constexpr uint32_t kCloudPollMs = 2500;
-static constexpr uint32_t kHeartbeatMs = 30000;
-static constexpr uint32_t kWiFiReconnectMs = 10000;
-static constexpr uint32_t kNetworkEnsureMs = 3000;
+static constexpr uint32_t kWiFiReconnectMs = 3000;
+static constexpr uint32_t kNetworkEnsureMs = 1000;
 static constexpr uint32_t kWiFiStatusLogIntervalMs = 30000;
-static constexpr uint32_t kCloudStartDelayAfterWiFiMs = 7000;
-static constexpr uint32_t kLocalPriorityHoldMs = 15000;
-static constexpr uint32_t kApReassertMs = 30000;
 static constexpr uint32_t kHttpServerReassertMs = 15000;
 
 static constexpr uint16_t kLocalHttpPort = 80;
-static constexpr uint8_t kApChannel = 6;
-static constexpr uint8_t kApMaxConnections = 4;
 
-static constexpr const char* kFirmwareVersion = "poot-esp8266-1.1.0";
-
-static constexpr uint8_t kCommandFetchLimit = 6;
-static constexpr uint32_t kFirebaseHttpTimeoutMs = 1200;
-static constexpr uint32_t kFirebaseSocketTimeoutMs = 800;
-static constexpr uint32_t kFirebaseAuthRetryInitialMs = 8000;
-static constexpr uint32_t kFirebaseAuthRetryMaxMs = 120000;
-static constexpr uint32_t kFirebaseAuthBackoffLogMs = 5000;
-static constexpr uint32_t kFirebaseRateLimitBackoffMs = 300000;
-static constexpr uint32_t kFirebaseUnauthorizedBackoffMs = 300000;
-static constexpr uint32_t kFirebaseSecureRequestGapMs = 2500;
-static constexpr uint32_t kFirebaseLowHeapBackoffMs = 60000;
-static constexpr uint32_t kFirebaseMinFreeHeapBytes = 20000;
-static constexpr uint32_t kFirebaseMinMaxBlockBytes = 9000;
-static constexpr uint16_t kFirebaseTlsRxBufferBytes = 1024;
-static constexpr uint16_t kFirebaseTlsTxBufferBytes = 1024;
+static constexpr const char* kFirmwareVersion = "poot-esp8266-2.0.1";
 
 }  // namespace poot

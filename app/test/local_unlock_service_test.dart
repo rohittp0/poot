@@ -16,14 +16,13 @@ class FakeSettingsService extends SettingsService {
 
 void main() {
   const LocalUnlockSettings settings = LocalUnlockSettings(
-    espSsid: 'Poot',
-    espPassword: 'password123',
+    homeWifiSsid: 'HomeWiFi',
+    homeWifiPassword: 'password123',
     sharedKey: 'shared-key',
     baseUrl: 'http://192.168.1.192',
-    hotspotBaseUrl: 'http://192.168.4.1',
   );
 
-  test('uses LAN first when the fixed IP responds', () async {
+  test('unlockViaLan sends correct request and returns success', () async {
     final List<Uri> requests = <Uri>[];
     final LocalUnlockService service = LocalUnlockService(
       settingsService: FakeSettingsService(settings),
@@ -37,7 +36,7 @@ void main() {
       }),
     );
 
-    final LocalUnlockResult result = await service.unlockLocally();
+    final LocalUnlockResult result = await service.unlockViaLan();
 
     expect(result.success, isTrue);
     expect(requests, <Uri>[
@@ -45,44 +44,58 @@ void main() {
     ]);
   });
 
-  test('falls back to hotspot after LAN transport failure', () async {
+  test('unlockViaLan returns invalid_key reason on 401', () async {
+    final LocalUnlockService service = LocalUnlockService(
+      settingsService: FakeSettingsService(settings),
+      httpClient: MockClient(
+        (_) async =>
+            http.Response('{"ok":false,"code":"invalid_key"}', 401),
+      ),
+    );
+
+    final LocalUnlockResult result = await service.unlockViaLan();
+
+    expect(result.success, isFalse);
+    expect(result.reason, 'invalid_key');
+  });
+
+  test('unlock calls LAN endpoint when lock is reachable via probe', () async {
     final List<Uri> requests = <Uri>[];
     final LocalUnlockService service = LocalUnlockService(
       settingsService: FakeSettingsService(settings),
       httpClient: MockClient((http.Request request) async {
         requests.add(request.url);
-        if (request.url.host == '192.168.1.192') {
+        if (request.url.path == '/') {
+          return http.Response('Poot lock online', 200);
+        }
+        return http.Response('{"ok":true,"code":"ok"}', 200);
+      }),
+    );
+
+    final LocalUnlockResult result = await service.unlock();
+
+    expect(result.success, isTrue);
+    expect(requests.last.path, '/api/local-unlock');
+  });
+
+  test('unlock proceeds to LAN endpoint even when probe fails', () async {
+    final List<Uri> requests = <Uri>[];
+    final LocalUnlockService service = LocalUnlockService(
+      settingsService: FakeSettingsService(settings),
+      httpClient: MockClient((http.Request request) async {
+        requests.add(request.url);
+        if (request.url.path == '/') {
           throw Exception('network unreachable');
         }
         return http.Response('{"ok":true,"code":"ok"}', 200);
       }),
     );
 
-    final LocalUnlockResult result = await service.unlockLocally();
+    final LocalUnlockResult result = await service.unlock();
 
+    // WiFi connect attempt fails silently (no platform channels in tests),
+    // then falls through to the unlock request which succeeds.
     expect(result.success, isTrue);
-    expect(requests, <Uri>[
-      Uri.parse('http://192.168.1.192/api/local-unlock?key=shared-key'),
-      Uri.parse('http://192.168.4.1/api/local-unlock?key=shared-key'),
-    ]);
-  });
-
-  test('does not fall back when LAN returns an auth failure', () async {
-    final List<Uri> requests = <Uri>[];
-    final LocalUnlockService service = LocalUnlockService(
-      settingsService: FakeSettingsService(settings),
-      httpClient: MockClient((http.Request request) async {
-        requests.add(request.url);
-        return http.Response('{"ok":false,"code":"invalid_key"}', 401);
-      }),
-    );
-
-    final LocalUnlockResult result = await service.unlockLocally();
-
-    expect(result.success, isFalse);
-    expect(result.reason, 'invalid_key');
-    expect(requests, <Uri>[
-      Uri.parse('http://192.168.1.192/api/local-unlock?key=shared-key'),
-    ]);
+    expect(requests.last.path, '/api/local-unlock');
   });
 }

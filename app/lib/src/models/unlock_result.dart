@@ -1,4 +1,4 @@
-enum UnlockPath { cloud, local, none }
+enum UnlockPath { local, none }
 
 class UnlockResult {
   const UnlockResult({

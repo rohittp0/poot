@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/auth_gate.dart';
+import 'screens/home_screen.dart';
 import 'services/app_services.dart';
 import 'theme/poot_theme.dart';
 
@@ -15,7 +15,7 @@ class PootApp extends StatelessWidget {
       title: 'Poot',
       debugShowCheckedModeBanner: false,
       theme: PootTheme.light,
-      home: AuthGate(services: services),
+      home: HomeScreen(services: services),
     );
   }
 }

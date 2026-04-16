@@ -10,19 +10,7 @@
 #define WIFI_STA_DNS1 IPAddress(192, 168, 1, 1)
 #define WIFI_STA_DNS2 IPAddress(8, 8, 8, 8)
 
-#define AP_SSID "Poot-Lock"
-#define AP_PASSWORD "CHANGE_ME_MIN_8_CHARS"
-
-// Realtime Database base URL, without trailing slash.
-// Example: https://your-project-default-rtdb.firebaseio.com
-#define FIREBASE_DB_URL "https://YOUR_PROJECT-default-rtdb.firebaseio.com"
-#define FIREBASE_API_KEY "YOUR_FIREBASE_WEB_API_KEY"
-
-// Dedicated device Firebase Auth account.
-#define FIREBASE_DEVICE_EMAIL "device-lock@example.com"
-#define FIREBASE_DEVICE_PASSWORD "DEVICE_ACCOUNT_PASSWORD"
-
 #define LOCK_ID "front-door"
 
-// Shared local fallback key sent directly to /api/local-unlock.
+// Shared key sent in ?key= query parameter to /api/local-unlock.
 #define LOCAL_SHARED_KEY "REPLACE_WITH_LONG_RANDOM_KEY"

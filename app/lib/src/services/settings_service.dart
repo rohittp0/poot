@@ -10,8 +10,8 @@ class SettingsService {
 
   final FlutterSecureStorage _secureStorage;
 
-  static const String _ssidKey = 'esp_ssid';
-  static const String _passwordKey = 'esp_password';
+  static const String _homeWifiSsidKey = 'home_wifi_ssid';
+  static const String _homeWifiPasswordKey = 'home_wifi_password';
   static const String _baseUrlKey = 'esp_base_url';
   static const String _sharedKeyStorageKey = 'shared_key';
   static const String _legacySharedSecretKey = 'shared_hmac_secret';
@@ -21,16 +21,16 @@ class SettingsService {
 
   String _preferStored(String? stored, String fallback) {
     final String normalized = _normalize(stored);
-    if (normalized.isNotEmpty) {
-      return normalized;
-    }
-    return fallback;
+    return normalized.isNotEmpty ? normalized : fallback;
   }
 
   Future<void> _persistSettings(LocalUnlockSettings settings) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_ssidKey, settings.espSsid.trim());
-    await prefs.setString(_passwordKey, settings.espPassword.trim());
+    await prefs.setString(_homeWifiSsidKey, settings.homeWifiSsid.trim());
+    await prefs.setString(
+      _homeWifiPasswordKey,
+      settings.homeWifiPassword.trim(),
+    );
     await prefs.setString(_baseUrlKey, settings.baseUrl.trim());
     await _secureStorage.write(
       key: _sharedKeyStorageKey,
@@ -44,11 +44,10 @@ class SettingsService {
     final bool hasManualOverrides = prefs.getBool(_manualOverridesKey) ?? false;
 
     final LocalUnlockSettings generatedDefaults = LocalUnlockSettings(
-      espSsid: LocalFallbackDefaults.espSsid,
-      espPassword: LocalFallbackDefaults.espPassword,
+      homeWifiSsid: LocalFallbackDefaults.homeWifiSsid,
+      homeWifiPassword: LocalFallbackDefaults.homeWifiPassword,
       sharedKey: LocalFallbackDefaults.sharedKey,
       baseUrl: LocalFallbackDefaults.baseUrl,
-      hotspotBaseUrl: LocalFallbackDefaults.hotspotBaseUrl,
     );
 
     if (!hasManualOverrides) {
@@ -61,19 +60,18 @@ class SettingsService {
         await _secureStorage.read(key: _legacySharedSecretKey);
 
     return LocalUnlockSettings(
-      espSsid: _preferStored(
-        prefs.getString(_ssidKey),
-        generatedDefaults.espSsid,
+      homeWifiSsid: _preferStored(
+        prefs.getString(_homeWifiSsidKey),
+        generatedDefaults.homeWifiSsid,
       ),
-      espPassword: _preferStored(
-        prefs.getString(_passwordKey),
-        generatedDefaults.espPassword,
+      homeWifiPassword: _preferStored(
+        prefs.getString(_homeWifiPasswordKey),
+        generatedDefaults.homeWifiPassword,
       ),
       baseUrl: _preferStored(
         prefs.getString(_baseUrlKey),
         generatedDefaults.baseUrl,
       ),
-      hotspotBaseUrl: generatedDefaults.hotspotBaseUrl,
       sharedKey: _preferStored(sharedKey, generatedDefaults.sharedKey),
     );
   }
@@ -86,13 +84,11 @@ class SettingsService {
 
   Future<LocalUnlockSettings> resetToDefaults() async {
     final LocalUnlockSettings defaults = LocalUnlockSettings(
-      espSsid: LocalFallbackDefaults.espSsid,
-      espPassword: LocalFallbackDefaults.espPassword,
+      homeWifiSsid: LocalFallbackDefaults.homeWifiSsid,
+      homeWifiPassword: LocalFallbackDefaults.homeWifiPassword,
       sharedKey: LocalFallbackDefaults.sharedKey,
       baseUrl: LocalFallbackDefaults.baseUrl,
-      hotspotBaseUrl: LocalFallbackDefaults.hotspotBaseUrl,
     );
-
     await _persistSettings(defaults);
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_manualOverridesKey, false);

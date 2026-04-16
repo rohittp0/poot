@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:wifi_iot/wifi_iot.dart';
 
@@ -20,14 +19,11 @@ class LocalUnlockResult {
 class LocalUnlockService {
   LocalUnlockService({
     required SettingsService settingsService,
-    Connectivity? connectivity,
     http.Client? httpClient,
   }) : _settingsService = settingsService,
-       _connectivity = connectivity ?? Connectivity(),
        _httpClient = httpClient ?? http.Client();
 
   final SettingsService _settingsService;
-  final Connectivity _connectivity;
   final http.Client _httpClient;
 
   Future<bool> canReachDirectLanUnlock() async {
@@ -36,13 +32,6 @@ class LocalUnlockService {
       if (settings == null) {
         return false;
       }
-
-      final List<ConnectivityResult> status =
-          await _connectivity.checkConnectivity();
-      if (!status.contains(ConnectivityResult.wifi)) {
-        return false;
-      }
-
       return _isReachable(Uri.parse('${settings.baseUrl}/'));
     } catch (_) {
       return false;
@@ -58,7 +47,6 @@ class LocalUnlockService {
           reason: 'local_settings_not_configured',
         );
       }
-
       return _requestLocalUnlock(
         uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
         sharedKey: settings.sharedKey,
@@ -71,7 +59,8 @@ class LocalUnlockService {
     }
   }
 
-  Future<LocalUnlockResult> unlockLocally() async {
+  // Checks reachability, connects to home WiFi if needed, then unlocks.
+  Future<LocalUnlockResult> unlock() async {
     try {
       final LocalUnlockSettings? settings = await _readConfiguredSettings();
       if (settings == null) {
@@ -81,56 +70,16 @@ class LocalUnlockService {
         );
       }
 
-      final LocalUnlockResult lanAttempt = await _requestLocalUnlock(
+      final bool reachable =
+          await _isReachable(Uri.parse('${settings.baseUrl}/'));
+      if (!reachable) {
+        await _connectToHomeWifi(settings);
+      }
+
+      return _requestLocalUnlock(
         uri: Uri.parse('${settings.baseUrl}/api/local-unlock'),
         sharedKey: settings.sharedKey,
       );
-      if (lanAttempt.success || !_isTransportFailure(lanAttempt.reason)) {
-        return lanAttempt;
-      }
-
-      await _bestEffortConnect(settings);
-
-      try {
-        return await _requestLocalUnlock(
-          uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
-          sharedKey: settings.sharedKey,
-        );
-      } finally {
-        if (Platform.isAndroid) {
-          await WiFiForIoTPlugin.forceWifiUsage(false);
-        }
-      }
-    } catch (_) {
-      return const LocalUnlockResult(
-        success: false,
-        reason: 'local_request_failed',
-      );
-    }
-  }
-
-  Future<LocalUnlockResult> unlockViaHotspot() async {
-    try {
-      final LocalUnlockSettings? settings = await _readConfiguredSettings();
-      if (settings == null) {
-        return const LocalUnlockResult(
-          success: false,
-          reason: 'local_settings_not_configured',
-        );
-      }
-
-      await _bestEffortConnect(settings);
-
-      try {
-        return await _requestLocalUnlock(
-          uri: Uri.parse('${settings.hotspotBaseUrl}/api/local-unlock'),
-          sharedKey: settings.sharedKey,
-        );
-      } finally {
-        if (Platform.isAndroid) {
-          await WiFiForIoTPlugin.forceWifiUsage(false);
-        }
-      }
     } catch (_) {
       return const LocalUnlockResult(
         success: false,
@@ -178,10 +127,6 @@ class LocalUnlockService {
     }
   }
 
-  bool _isTransportFailure(String reason) {
-    return reason == 'local_timeout' || reason == 'local_request_failed';
-  }
-
   Future<LocalUnlockSettings?> _readConfiguredSettings() async {
     final LocalUnlockSettings settings = await _settingsService.readSettings();
     if (!settings.isConfigured) {
@@ -204,43 +149,30 @@ class LocalUnlockService {
     }
   }
 
-  Future<void> _bestEffortConnect(LocalUnlockSettings settings) async {
+  Future<void> _connectToHomeWifi(LocalUnlockSettings settings) async {
+    if (settings.homeWifiSsid.isEmpty) {
+      return;
+    }
     if (!Platform.isAndroid && !Platform.isIOS) {
       return;
     }
 
     try {
       await WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: false);
-    } catch (_) {
-      // iOS may block this call; continue with best effort.
-    }
+    } catch (_) {}
 
     try {
       await WiFiForIoTPlugin.connect(
-        settings.espSsid,
-        password: settings.espPassword,
+        settings.homeWifiSsid,
+        password: settings.homeWifiPassword,
         security: NetworkSecurity.WPA,
         joinOnce: true,
-        withInternet: false,
+        withInternet: true,
       );
     } catch (_) {
-      // iOS can require user confirmation via system prompt.
-    }
-
-    if (Platform.isAndroid) {
-      try {
-        await WiFiForIoTPlugin.forceWifiUsage(true);
-      } catch (_) {
-        // Continue even if network binding fails.
-      }
+      // iOS may require user confirmation via system prompt.
     }
 
     await Future<void>.delayed(const Duration(seconds: 2));
-
-    final List<ConnectivityResult> status =
-        await _connectivity.checkConnectivity();
-    if (!status.contains(ConnectivityResult.wifi)) {
-      await Future<void>.delayed(const Duration(seconds: 1));
-    }
   }
 }
