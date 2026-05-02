@@ -31,21 +31,19 @@ void RelayController::loop() {
 bool RelayController::triggerPulse(uint32_t durationMs, uint32_t cooldownMs) {
   const uint32_t now = millis();
   if (relayOn_) {
-    pulseEndMs_ = now + durationMs;
-    cooldownUntilMs_ = pulseEndMs_ + cooldownMs;
-    poot_diag::logf("RELAY", "pulse refreshed duration=%lu ms cooldown=%lu ms",
-                    durationMs, cooldownMs);
-    return true;
+    poot_diag::logf("RELAY", "trigger denied: pulse active until=%lu now=%lu",
+                    pulseEndMs_, now);
+    return false;
   }
-
-  const bool restartingDuringCooldown =
-      cooldownUntilMs_ != 0 && !timeReached(now, cooldownUntilMs_);
+  if (cooldownUntilMs_ != 0 && !timeReached(now, cooldownUntilMs_)) {
+    poot_diag::logf("RELAY", "trigger denied: cooldown until=%lu now=%lu",
+                    cooldownUntilMs_, now);
+    return false;
+  }
   writeRelay(true);
   pulseEndMs_ = now + durationMs;
   cooldownUntilMs_ = pulseEndMs_ + cooldownMs;
-  poot_diag::logf("RELAY", "%s duration=%lu ms cooldown=%lu ms",
-                  restartingDuringCooldown ? "pulse restarted during cooldown"
-                                           : "pulse started",
+  poot_diag::logf("RELAY", "pulse started duration=%lu ms cooldown=%lu ms",
                   durationMs, cooldownMs);
   return true;
 }

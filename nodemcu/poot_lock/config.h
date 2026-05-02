@@ -25,7 +25,14 @@ static constexpr uint32_t kWiFiStatusLogIntervalMs = 3000;
 static constexpr uint32_t kHttpServerReassertMs = 15000;
 
 static constexpr uint16_t kLocalHttpPort = 80;
+static constexpr uint8_t  kApMaxConnections = 4;          // 0-8
+static constexpr uint16_t kOtaPort = 8266;                // ArduinoOTA default
+static constexpr const char* kMdnsHostname = "poot";
 
-static constexpr const char* kFirmwareVersion = "poot-esp8266-2.0.1";
+// Auto-reboot every hour to reset soft state. The reboot is unconditional;
+// in-flight AP unlocks are interrupted but the phone simply retries.
+static constexpr uint32_t kAutoRebootIntervalMs = 60UL * 60UL * 1000UL;
+
+static constexpr const char* kFirmwareVersion = "poot-esp8266-2.1.0";
 
 }  // namespace poot

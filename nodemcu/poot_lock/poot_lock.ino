@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266mDNS.h>
 
 #include "config.h"
 #include "diagnostics.h"
@@ -10,6 +12,10 @@
 
 RelayController relay(poot::kRelayPin, poot::kRelayActiveLow);
 ESP8266WebServer server(poot::kLocalHttpPort);
+
+WiFiEventHandler gOnStaDisconnected;
+WiFiEventHandler gOnStaGotIp;
+volatile bool gReassertHttpRequested = false;
 
 const IPAddress kStaIp = WIFI_STA_IP;
 const IPAddress kStaGateway = WIFI_STA_GATEWAY;
@@ -205,10 +211,6 @@ void connectSta(bool forceReconnect = false) {
     return;
   }
 
-  // Unlock while connecting so the lock is never permanently inaccessible
-  // if WiFi is down. The relay cooldown prevents double-firing on rapid retries.
-  relay.triggerPulse(poot::kUnlockPulseMs, poot::kUnlockCooldownMs);
-
   const wl_status_t prevStatus = WiFi.status();
   poot_diag::logf("WIFI", "connectSta force=%u prevStatus=%s(%d)",
                   forceReconnect ? 1 : 0, wifiStatusName(prevStatus), prevStatus);
@@ -277,6 +279,39 @@ void ensureHttpServer(bool forceRestart = false) {
       sendJson(fired ? 200 : 429, response);
     });
 
+    server.on("/api/health", HTTP_GET, []() {
+      const String remoteIp = server.client().remoteIP().toString();
+      poot_diag::logf("LOCAL_HTTP", "GET /api/health from %s", remoteIp.c_str());
+
+      if (!server.hasArg("key") || server.arg("key") != LOCAL_SHARED_KEY) {
+        StaticJsonDocument<128> denied;
+        denied["ok"] = false;
+        denied["code"] = "invalid_key";
+        denied["message"] = "Health denied";
+        sendJson(401, denied);
+        return;
+      }
+
+      StaticJsonDocument<384> health;
+      health["ok"] = true;
+      health["version"] = poot::kFirmwareVersion;
+      health["uptime_ms"] = millis();
+      health["free_heap"] = ESP.getFreeHeap();
+      health["reset_reason"] = ESP.getResetReason();
+      JsonObject sta = health.createNestedObject("sta");
+      sta["status"] = wifiStatusName(WiFi.status());
+      sta["ip"] = WiFi.localIP().toString();
+      sta["rssi"] = WiFi.RSSI();
+      sta["ssid"] = WiFi.SSID();
+      JsonObject ap = health.createNestedObject("ap");
+      ap["ip"] = WiFi.softAPIP().toString();
+      ap["stations"] = WiFi.softAPgetStationNum();
+      JsonObject rly = health.createNestedObject("relay");
+      rly["on"] = relay.isRelayOn();
+      rly["cooling"] = relay.isCoolingDown();
+      sendJson(200, health);
+    });
+
     server.onNotFound([]() {
       poot_diag::logf("HTTP", "404 %s", server.uri().c_str());
       StaticJsonDocument<128> response;
@@ -303,14 +338,91 @@ void ensureHttpServer(bool forceRestart = false) {
   }
 }
 
+void setupSoftAp() {
+  const IPAddress apIp(192, 168, 4, 1);
+  const IPAddress apGateway(192, 168, 4, 1);
+  const IPAddress apSubnet(255, 255, 255, 0);
+  const bool configured = WiFi.softAPConfig(apIp, apGateway, apSubnet);
+  const bool apOk = WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD,
+                                WIFI_AP_CHANNEL, /*hidden=*/false,
+                                poot::kApMaxConnections);
+  poot_diag::logf("AP",
+                  "softAP config=%s up=%s ssid=%s ip=%s channel=%u maxConn=%u",
+                  configured ? "ok" : "failed", apOk ? "ok" : "failed",
+                  WIFI_AP_SSID, WiFi.softAPIP().toString().c_str(),
+                  (unsigned)WIFI_AP_CHANNEL, (unsigned)poot::kApMaxConnections);
+}
+
+void registerWiFiEventHandlers() {
+  gOnStaDisconnected =
+      WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) {
+        poot_diag::logf("WIFI", "STA disconnected ssid=%s reason=%u",
+                        e.ssid.c_str(), e.reason);
+      });
+  gOnStaGotIp = WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP& e) {
+    poot_diag::logf("WIFI", "STA got ip=%s mask=%s gw=%s",
+                    e.ip.toString().c_str(), e.mask.toString().c_str(),
+                    e.gw.toString().c_str());
+    // Defer server.stop()/begin() and mDNS work to loop() — running them
+    // inside the SDK event context can race the active server.
+    gReassertHttpRequested = true;
+  });
+}
+
 void setupWiFi() {
   WiFi.persistent(false);
   WiFi.setAutoReconnect(true);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
-  WiFi.mode(WIFI_STA);
-  poot_diag::logf("WIFI", "mode STA");
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setHostname(poot::kMdnsHostname);
+  poot_diag::logf("WIFI", "mode AP_STA hostname=%s", poot::kMdnsHostname);
+  setupSoftAp();
+  registerWiFiEventHandlers();
   scanAndLogNetworks();
   connectSta();
+}
+
+void setupMdns() {
+  if (MDNS.begin(poot::kMdnsHostname)) {
+    MDNS.addService("http", "tcp", poot::kLocalHttpPort);
+    poot_diag::logf("MDNS", "responder up as %s.local", poot::kMdnsHostname);
+  } else {
+    poot_diag::logf("MDNS", "begin failed");
+  }
+}
+
+void setupOta() {
+  ArduinoOTA.setHostname(poot::kMdnsHostname);
+  ArduinoOTA.setPort(poot::kOtaPort);
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() {
+    const char* type = (ArduinoOTA.getCommand() == U_FLASH) ? "flash" : "fs";
+    poot_diag::logf("OTA", "update start type=%s", type);
+  });
+  ArduinoOTA.onEnd([]() { poot_diag::logf("OTA", "update end"); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    static unsigned int lastPct = 0;
+    const unsigned int pct = (total == 0) ? 0 : (progress * 100u) / total;
+    if (pct != lastPct && pct % 10u == 0) {
+      poot_diag::logf("OTA", "progress %u%%", pct);
+      lastPct = pct;
+    }
+  });
+  ArduinoOTA.onError([](ota_error_t e) { poot_diag::logf("OTA", "error %u", e); });
+  ArduinoOTA.begin();
+  poot_diag::logf("OTA", "ready hostname=%s port=%u", poot::kMdnsHostname,
+                  (unsigned)poot::kOtaPort);
+}
+
+void maybeAutoReboot() {
+  if (millis() < poot::kAutoRebootIntervalMs) {
+    return;
+  }
+  poot_diag::logf("WDT", "auto-reboot: %lu ms uptime, scheduled hourly reset",
+                  millis());
+  Serial.flush();
+  delay(50);
+  ESP.restart();
 }
 
 void ensureNetworkStack() {
@@ -356,14 +468,25 @@ void setup() {
 
   setupWiFi();
   ensureHttpServer();
+  setupMdns();
+  setupOta();
 }
 
 void loop() {
   pumpLocalServer();
+  if (gReassertHttpRequested) {
+    gReassertHttpRequested = false;
+    poot_diag::logf("HTTP", "re-asserting after STA got IP");
+    ensureHttpServer(/*forceRestart=*/true);
+    MDNS.notifyAPChange();
+  }
   relay.loop();
   logWiFiStatusIfChanged();
   ensureNetworkStack();
   pumpLocalServer();
+  ArduinoOTA.handle();
+  MDNS.update();
+  maybeAutoReboot();
   updateStatusLed();
   yield();
 }
